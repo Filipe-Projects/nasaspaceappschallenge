@@ -1131,6 +1131,45 @@
       sel.insertBefore(opt, after || null);
     }
     sel.value = String(v);
+    renderFov();
+  }
+  /** The band menu: the same kind of list, kept in step with the hidden band radios. */
+  function renderBand() {
+    const name = (v) => (v === 'ALL' ? 'All' : v === 'RGB' ? 'Colour' : `Band ${v.slice(1)}`);
+    $('#band-value').textContent = name(bandChoice());
+    $('#band-list').replaceChildren(...Array.from(document.querySelectorAll('input[name=band]')).map((el) => {
+      const b = document.createElement('button');
+      b.type = 'button'; b.disabled = el.disabled;
+      const label = document.createElement('span'); label.textContent = name(el.value);
+      const range = document.createElement('small'); range.textContent = el.value === 'RGB' ? 'three colours' : `${BAND_RANGES[el.value]} µm`;
+      b.append(label, range);
+      if (el.value === 'RGB') b.title = 'Bands 1–2 in blue, 3–4 in green, 5–6 in red. Cold objects come out red';
+      if (el.checked) b.setAttribute('aria-current', 'true');
+      b.addEventListener('click', () => {
+        $('#band-menu').open = false;
+        if (el.checked) return;
+        el.checked = true;
+        el.dispatchEvent(new Event('change'));
+      });
+      return b;
+    }));
+  }
+  /** The field menu: a list in the platform's own style, kept in step with the hidden #fov select. */
+  function renderFov() {
+    const sel = $('#fov'), list = $('#fov-list');
+    $('#fov-value').textContent = sel.selectedOptions[0] ? sel.selectedOptions[0].textContent : '';
+    list.replaceChildren(...Array.from(sel.options).map((o) => {
+      const b = document.createElement('button');
+      b.type = 'button'; b.textContent = o.textContent;
+      if (o.value === sel.value) b.setAttribute('aria-current', 'true');
+      b.addEventListener('click', () => {
+        $('#fov-menu').open = false;
+        if (sel.value === o.value) return;
+        sel.value = o.value; renderFov();
+        sel.dispatchEvent(new Event('change'));
+      });
+      return b;
+    }));
   }
   async function resolveTarget(query) {
     clearError();
@@ -1267,13 +1306,14 @@
       else el.disabled = Boolean(r) && group() === 'epoch' && !state.frames.some((f) => f.meta.band === el.value);
     });
     if (document.querySelector('input[name=band]:checked:disabled')) { const all = $('input[name=band][value=ALL]'); all.disabled = false; all.checked = true; }
+    renderBand();
   }
   function onSelectionChange() {
     const m = mode();
     $('#ref-wrap').classList.toggle('hidden', !(m === 'diff' || m === 'blink') || !state.result);
     $('#blink-wrap').classList.toggle('hidden', m !== 'blink' || !state.result);
     $('#ref-label').textContent = m === 'blink' ? 'Blink' : 'Minus';
-    $('#band-range').textContent = `${BAND_RANGES[bandChoice()]} µm`;
+    renderBand();
     state.levelCache.clear();
     buildSequence();
     if (state.result && group() === 'exposure') buildThumbs();
@@ -1865,6 +1905,7 @@
   $$('button[data-id][data-fov]').forEach((b) => b.addEventListener('click', () => openTarget(b.dataset.id, parseFloat(b.dataset.fov))));
   $('#btn-load').addEventListener('click', () => { if (state.target) loadFrames(); else $('#target-form').requestSubmit(); });
   $('#btn-dismiss').addEventListener('click', clearError);
+  renderFov(); renderBand();
   $('#fov').addEventListener('change', () => { if (state.target && document.body.classList.contains('is-working')) loadFrames(); });
   $$('input[name=view]').forEach((el) => el.addEventListener('change', () => {
     if (state.target && state.result && seqKind() !== group()) { loadFrames(); return; }

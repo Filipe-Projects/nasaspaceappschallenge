@@ -39,14 +39,14 @@
   <div class="start-inner">
     <div class="start-copy">
       <h1 class="display">Find what moved in the infrared sky</h1>
-      <p class="lead">Search a star or a position. Every SPHEREx visit to that patch of sky plays back as a short film.</p>
+      <p class="lead">Search an object or a position. Every SPHEREx visit to that patch of sky plays back as a short film.</p>
       <div id="start-search-slot">
         <div class="search-box" id="search-box">
           <form id="target-form" class="search" role="search">
-            <label class="visually-hidden" for="target-input">Star name or coordinates</label>
+            <label class="visually-hidden" for="target-input">Object name or coordinates</label>
             <input id="target-input" type="text" autocomplete="off" spellcheck="false" enterkeyhint="search"
                    role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="target-suggest"
-                   placeholder="Star name or coordinates"
+                   placeholder="Object name or coordinates"
                    title="A name, or coordinates such as 08h55m10.8s -7d14m42.5s or 133.76 -7.24">
             <button type="submit" class="search-go" title="Search">
               <svg class="i" viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.6" cy="8.6" r="5.4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12.8 12.8L17 17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
@@ -73,23 +73,27 @@
         <label title="Step through single exposures"><input type="radio" name="view" value="exposure"><span>Exposures</span></label>
       </fieldset>
 
-      <fieldset class="opts" id="band-seg">
-        <legend>Band <output id="band-range" class="band-range">0.75–5.01 µm</output></legend>
-        <div class="band-grid">
-          <label class="band-all" title="All six bands, 0.75–5.01 µm"><input type="radio" name="band" value="ALL" checked><span>All</span></label>
-          <label class="band-colour" title="Three colours: bands 1–2 in blue, 3–4 in green, 5–6 in red. Cold objects come out red"><input type="radio" name="band" value="RGB"><span>Colour</span></label>
-          <label title="Band 1, 0.75–1.11 µm"><input type="radio" name="band" value="D1"><span>1</span></label>
-          <label title="Band 2, 1.10–1.65 µm"><input type="radio" name="band" value="D2"><span>2</span></label>
-          <label title="Band 3, 1.63–2.43 µm"><input type="radio" name="band" value="D3"><span>3</span></label>
-          <label title="Band 4, 2.40–3.85 µm"><input type="radio" name="band" value="D4"><span>4</span></label>
-          <label title="Band 5, 3.81–4.43 µm"><input type="radio" name="band" value="D5"><span>5</span></label>
-          <label title="Band 6, 4.41–5.01 µm"><input type="radio" name="band" value="D6"><span>6</span></label>
+      <div class="opts opts-field" id="band-seg">
+        <span class="opts-caption" aria-hidden="true">Band</span>
+        <div hidden>
+          <input type="radio" name="band" value="ALL" checked>
+          <input type="radio" name="band" value="RGB">
+          <input type="radio" name="band" value="D1">
+          <input type="radio" name="band" value="D2">
+          <input type="radio" name="band" value="D3">
+          <input type="radio" name="band" value="D4">
+          <input type="radio" name="band" value="D5">
+          <input type="radio" name="band" value="D6">
         </div>
-      </fieldset>
+        <details class="menu pick-menu" id="band-menu">
+          <summary aria-label="Band" title="Which of the six SPHEREx bands to show, 0.75–5.01 µm in all"><span id="band-value">All</span></summary>
+          <div class="menu-panel menu-list" id="band-list"></div>
+        </details>
+      </div>
 
-      <fieldset class="opts opts-field">
-        <legend>Field</legend>
-        <select id="fov" aria-label="Field of view" title="Width of the patch of sky shown. A wider field takes longer to load">
+      <div class="opts opts-field">
+        <span class="opts-caption" aria-hidden="true">Field</span>
+        <select id="fov" hidden>
           <option value="3">3′</option>
           <option value="5">5′</option>
           <option value="6">6′</option>
@@ -100,7 +104,11 @@
           <option value="20">20′</option>
           <option value="30">30′</option>
         </select>
-      </fieldset>
+        <details class="menu pick-menu" id="fov-menu">
+          <summary aria-label="Field of view" title="Width of the patch of sky shown. A wider field takes longer to load"><span id="fov-value">8′</span></summary>
+          <div class="menu-panel menu-list" id="fov-list"></div>
+        </details>
+      </div>
 
       <fieldset class="opts opts-layers">
         <legend>Overlays</legend>
