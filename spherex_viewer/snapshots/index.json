@@ -15,6 +15,16 @@
   }
  },
  {
+  "kind": "search",
+  "file": "barnard-search.json.gz",
+  "saved": "2026-11-17",
+  "params": {
+   "ra": 269.446101,
+   "dec": 4.770363,
+   "radius": 0.19
+  }
+ },
+ {
   "kind": "spectrum",
   "file": "barnard-spectrum.json.gz",
   "saved": "2026-11-15",
@@ -46,6 +56,16 @@
    "flags": false,
    "mask": [],
    "max_exposures": 800
+  }
+ },
+ {
+  "kind": "search",
+  "file": "epsindi-b-search.json.gz",
+  "saved": "2026-11-17",
+  "params": {
+   "ra": 331.098158,
+   "dec": -56.801174,
+   "radius": 0.19
   }
  },
  {
@@ -83,6 +103,16 @@
   }
  },
  {
+  "kind": "search",
+  "file": "rdra-search.json.gz",
+  "saved": "2026-11-17",
+  "params": {
+   "ra": 248.167222,
+   "dec": 66.755025,
+   "radius": 0.19
+  }
+ },
+ {
   "kind": "spectrum",
   "file": "rdra-spectrum.json.gz",
   "saved": "2026-11-15",
@@ -117,6 +147,16 @@
   }
  },
  {
+  "kind": "search",
+  "file": "rwaur-search.json.gz",
+  "saved": "2026-11-17",
+  "params": {
+   "ra": 76.956588,
+   "dec": 30.401287,
+   "radius": 0.19
+  }
+ },
+ {
   "kind": "spectrum",
   "file": "rwaur-spectrum.json.gz",
   "saved": "2026-11-15",
@@ -136,6 +176,16 @@
   }
  },
  {
+  "kind": "search",
+  "file": "wise0855-2010-search.json.gz",
+  "saved": "2026-11-17",
+  "params": {
+   "ra": 133.795129,
+   "dec": -7.245147,
+   "radius": 0.19
+  }
+ },
+ {
   "kind": "frames",
   "file": "wise0855-frames.json.gz",
   "saved": "2026-11-15",
@@ -148,6 +198,16 @@
    "flags": false,
    "mask": [],
    "max_exposures": 800
+  }
+ },
+ {
+  "kind": "search",
+  "file": "wise0855-search.json.gz",
+  "saved": "2026-11-17",
+  "params": {
+   "ra": 133.758059,
+   "dec": -7.242046,
+   "radius": 0.19
   }
  },
  {

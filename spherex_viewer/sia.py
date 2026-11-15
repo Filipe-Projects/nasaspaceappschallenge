@@ -11,6 +11,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import math
 import re
 import threading
 import time
@@ -19,7 +20,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime, timedelta
 from urllib.parse import quote, urlencode
 
-from . import config
+from . import config, snapshots
 from .cache import default_cache
 from .http import TransientHTTPError, fetch
 
@@ -182,8 +183,21 @@ def query_collection(collection: str, ra: float, dec: float, radius_deg: float,
     return exposures
 
 
+# Fields up to 15′ wide are searched with one circle around their centre. IRSA takes as long
+# for a small circle as for this one, and every narrower request at that centre (another field
+# of view, single exposures, a spectrum) is then cut from the same answer without asking again.
+SHARED_RADIUS_DEG = 0.19
+
 _refreshing: set[str] = set()
 _refresh_lock = threading.Lock()
+# One search per circle at a time: a second request for the same circle waits for the first answer.
+_flights: dict[str, threading.Lock] = {}
+_flights_guard = threading.Lock()
+
+
+def _flight(key: str) -> threading.Lock:
+    with _flights_guard:
+        return _flights.setdefault(key, threading.Lock())
 
 
 def _query_all(collections: list[str], ra: float, dec: float, radius_deg: float,
@@ -229,43 +243,102 @@ def _cache_key(collections: list[str], ra: float, dec: float, radius_deg: float)
     return f"{'|'.join(collections)}|{ra:.5f}|{dec:.5f}|{radius_deg:.4f}"
 
 
-def search_is_cached(ra: float, dec: float, radius_deg: float) -> bool:
-    """True when this search can be answered without asking IRSA."""
-    from .releases import active_collections
-    path = default_cache().path("sia", _cache_key(list(active_collections()), ra, dec, radius_deg), ".json")
-    return path.exists()
+def touches(exp: Exposure, ra: float, dec: float, radius_deg: float) -> bool:
+    """Whether the footprint of *exp* reaches the circle, as IRSA's own search decides.
+
+    The footprint is projected on the plane tangent at the centre of the circle,
+    where great circles are straight lines and the distance from the centre is the
+    tangent of the angle.  An exposure without a usable footprint is kept.
+    """
+    if len(exp.footprint) < 3:
+        return True
+    ra0, dec0 = math.radians(ra), math.radians(dec)
+    sin0, cos0 = math.sin(dec0), math.cos(dec0)
+    corners = []
+    for p_ra, p_dec in exp.footprint:
+        a, d = math.radians(p_ra) - ra0, math.radians(p_dec)
+        cosc = sin0 * math.sin(d) + cos0 * math.cos(d) * math.cos(a)
+        if cosc < 0.1:                                 # a corner far round the sky: nowhere near
+            return False
+        corners.append((math.cos(d) * math.sin(a) / cosc,
+                        (cos0 * math.sin(d) - sin0 * math.cos(d) * math.cos(a)) / cosc))
+    edges = list(zip(corners, corners[1:] + corners[:1]))
+    inside = False
+    for (x1, y1), (x2, y2) in edges:                   # the centre inside the footprint
+        if (y1 > 0) != (y2 > 0) and x1 - y1 * (x2 - x1) / (y2 - y1) > 0:
+            inside = not inside
+    if inside:
+        return True
+    reach = math.tan(math.radians(radius_deg))
+    for (x1, y1), (x2, y2) in edges:                   # or an edge within the radius
+        dx, dy = x2 - x1, y2 - y1
+        length2 = dx * dx + dy * dy
+        t = 0.0 if length2 == 0 else min(1.0, max(0.0, -(x1 * dx + y1 * dy) / length2))
+        if math.hypot(x1 + t * dx, y1 + t * dy) <= reach:
+            return True
+    return False
+
+
+def _answer(collections: list[str], ra: float, dec: float, radius_deg: float, ask: bool, stored: bool = True,
+            failures: dict | None = None, timeout: float | None = None) -> list[Exposure] | None:
+    """Exposures reaching the circle, or None when that needs IRSA and *ask* is false.
+
+    A stored answer that is more than a day old, or that comes from the copies
+    saved with the package, is returned at once and renewed in the background.
+    """
+    wide = max(radius_deg, SHARED_RADIUS_DEG)
+    key = _cache_key(collections, ra, dec, wide)
+    cache = default_cache()
+    rows = cache.get_json("sia", key, ttl=config.SIA_CACHE_TTL)
+    if rows is None and stored:
+        older = cache.get_json("sia", _cache_key(collections, ra, dec, radius_deg)) if wide > radius_deg else None
+        if older is not None:                          # searched with the field's own circle, before it was shared
+            _refresh_later(key, collections, ra, dec, wide)
+            return [Exposure.from_dict(d) for d in older]
+        rows = cache.get_json("sia", key)
+        if rows is None:
+            rows = snapshots.search(ra, dec, wide)
+        if rows is not None:
+            _refresh_later(key, collections, ra, dec, wide)
+    if rows is None:
+        if not ask:
+            return None
+        with _flight(key):
+            rows = cache.get_json("sia", key, ttl=config.SIA_CACHE_TTL)       # answered while this one waited
+            if rows is None:
+                merged, failed = _query_all(collections, ra, dec, wide, timeout)
+                if failed:
+                    if len(failed) == len(collections):
+                        raise next(iter(failed.values()))
+                    if failures is not None:
+                        failures.update({name: f"{type(exc).__name__}: {exc}" for name, exc in failed.items()})
+                else:
+                    cache.put_json("sia", key, [asdict(e) for e in merged])
+                rows = [asdict(e) for e in merged]
+    exposures = [Exposure.from_dict(d) for d in rows]
+    return exposures if wide == radius_deg else [e for e in exposures if touches(e, ra, dec, radius_deg)]
 
 
 def cached_exposures(ra: float, dec: float, radius_deg: float) -> list[Exposure] | None:
-    """The answer :func:`find_exposures` would give from the cache, or None; never waits on IRSA.
-
-    An old answer is renewed in the background, as in :func:`find_exposures`.
-    """
+    """The answer :func:`find_exposures` would give without asking IRSA, or None."""
     from .releases import active_collections
-    collections = list(active_collections())
-    cache = default_cache()
-    key = _cache_key(collections, ra, dec, radius_deg)
-    data = cache.get_json("sia", key, ttl=config.SIA_CACHE_TTL)
-    if data is None:
-        data = cache.get_json("sia", key)
-        if data is None:
-            return None
-        _refresh_later(key, collections, ra, dec, radius_deg)
-    return [Exposure.from_dict(d) for d in data]
+    return _answer(list(active_collections()), ra, dec, radius_deg, ask=False)
 
 
 def find_exposures(ra: float, dec: float, radius_deg: float,
                    collections: list[str] | None = None,
-                   use_cache: bool = True, failures: dict | None = None,
+                   stored: bool = True, failures: dict | None = None,
                    timeout: float | None = None) -> list[Exposure]:
     """All SPHEREx exposures intersecting the circle, sorted by time.
 
     Duplicate (obs_id, detector) pairs across collections keep the entry from
     the collection listed first in ``config.COLLECTIONS``.  Results are cached
-    for a day (new data arrive weekly).  An older cached answer is still
-    returned at once, and renewed in the background for the next request: a
-    field that has been seen before never waits for the search, and keeps
-    working while IRSA is out of reach.
+    for a day (new data arrive weekly).  An older cached answer, or the copy
+    saved with the package for a test target, is still returned at once and
+    renewed in the background for the next request: a field that has been seen
+    before never waits for the search, and keeps working while IRSA is out of
+    reach.  With *stored* false only a fresh answer will do (the disk cache of
+    the last day, or IRSA).
 
     A collection that cannot be searched leaves the answer incomplete (an
     epoch may be missing).  That is never cached, and when the caller passes a
@@ -275,24 +348,5 @@ def find_exposures(ra: float, dec: float, radius_deg: float,
     if not collections:
         from .releases import active_collections
         collections = active_collections()
-    collections = list(collections)
-    cache = default_cache()
-    key = _cache_key(collections, ra, dec, radius_deg)
-    if use_cache:
-        cached = cache.get_json("sia", key, ttl=config.SIA_CACHE_TTL)
-        if cached is not None:
-            return [Exposure.from_dict(d) for d in cached]
-        stale = cache.get_json("sia", key)
-        if stale is not None:
-            _refresh_later(key, collections, ra, dec, radius_deg)
-            return [Exposure.from_dict(d) for d in stale]
-
-    merged, failed = _query_all(collections, ra, dec, radius_deg, timeout)
-    if failed:
-        if len(failed) == len(collections):
-            raise next(iter(failed.values()))
-        if failures is not None:
-            failures.update({name: f"{type(exc).__name__}: {exc}" for name, exc in failed.items()})
-    if not failed:
-        cache.put_json("sia", key, [asdict(e) for e in merged])
-    return merged
+    return _answer(list(collections), ra, dec, radius_deg, ask=True, stored=stored,
+                   failures=failures, timeout=timeout)

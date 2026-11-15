@@ -484,13 +484,84 @@ def test_an_old_cached_search_is_returned_at_once_and_renewed_in_the_background(
     os.utime(disk.path("sia", key, ".json"), (old, old))
 
     found = sia.find_exposures(10.0, 10.0, 0.1, collections=["spherex_dr1"])
-    assert [e.key for e in found] == ["2025W30_1A_0001_1/D1"] and asked == [key]
+    # an answer stored for the field's own circle still counts; the shared, wider circle is asked for next
+    assert [e.key for e in found] == ["2025W30_1A_0001_1/D1"]
+    assert asked == [sia._cache_key(["spherex_dr1"], 10.0, 10.0, sia.SHARED_RADIUS_DEG)]
     with pytest.raises(RuntimeError):                          # never seen before: nothing to fall back on
         sia.find_exposures(20.0, 10.0, 0.1, collections=["spherex_dr1"])
 
 
-def test_snapshots_cover_the_five_test_targets_and_nothing_else():
-    from spherex_viewer import pipeline, snapshots
+def _square(ra, dec, half):
+    """A footprint: a square of side 2 * half degrees around (ra, dec), closed as IRSA writes it."""
+    c = math.cos(math.radians(dec))
+    corners = [(ra - half / c, dec - half), (ra + half / c, dec - half), (ra + half / c, dec + half), (ra - half / c, dec + half)]
+    return [list(p) for p in corners + corners[:1]]
+
+
+def test_a_footprint_reaches_a_circle_when_it_covers_its_centre_or_passes_within_its_radius():
+    from spherex_viewer import sia
+
+    exp = _exposure()
+    exp.footprint = _square(10.0, 10.0, 1.0)
+    assert sia.touches(exp, 10.0, 10.0, 0.1)                   # centre inside
+    assert sia.touches(exp, 10.0, 11.05, 0.1)                  # 0.05° above the top edge
+    assert not sia.touches(exp, 10.0, 11.15, 0.1)              # 0.15° above it
+    assert not sia.touches(exp, 190.0, -10.0, 0.1)             # the other side of the sky
+    assert sia.touches(_exposure(), 50.0, 50.0, 0.1)           # no footprint: kept
+    exp.footprint = _square(0.2, 0.0, 0.5)                     # across RA 0
+    assert sia.touches(exp, 359.8, 0.0, 0.1) and sia.touches(exp, 359.65, 0.0, 0.1)
+
+
+def test_a_narrower_field_is_cut_from_the_shared_search_without_asking_irsa(tmp_path, monkeypatch):
+    from dataclasses import asdict
+
+    from spherex_viewer import cache as cache_module, sia
+
+    disk = cache_module.DiskCache(tmp_path)
+    monkeypatch.setattr(sia, "default_cache", lambda: disk)
+
+    def unreachable(*args, **kwargs):
+        raise AssertionError("IRSA must not be asked")
+
+    monkeypatch.setattr(sia, "query_collection", unreachable)
+    near, edge = _exposure("2025W30_1A_0001_1"), _exposure("2025W30_1A_0002_1")
+    near.footprint = _square(10.0, 10.0, 1.0)
+    edge.footprint = _square(10.0, 8.85, 1.0)                  # top edge 0.15° below the centre
+    disk.put_json("sia", sia._cache_key(["spherex_dr1"], 10.0, 10.0, sia.SHARED_RADIUS_DEG), [asdict(near), asdict(edge)])
+
+    assert len(sia.find_exposures(10.0, 10.0, 0.18, collections=["spherex_dr1"])) == 2
+    assert [e.key for e in sia.find_exposures(10.0, 10.0, 0.1, collections=["spherex_dr1"])] == [near.key]
+
+
+def test_the_same_search_asked_twice_at_once_goes_to_irsa_once(tmp_path, monkeypatch):
+    import threading
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    from spherex_viewer import cache as cache_module, sia
+
+    disk = cache_module.DiskCache(tmp_path)
+    monkeypatch.setattr(sia, "default_cache", lambda: disk)
+    monkeypatch.setattr(sia.snapshots, "search", lambda *args: None)
+    calls, lock = [], threading.Lock()
+
+    def slow(collection, ra, dec, radius, timeout=None):
+        with lock:
+            calls.append(collection)
+        time.sleep(0.3)
+        return [_exposure()]
+
+    monkeypatch.setattr(sia, "query_collection", slow)
+    with ThreadPoolExecutor(3) as pool:
+        answers = list(pool.map(lambda r: sia.find_exposures(30.0, 5.0, r, collections=["spherex_dr1"]), [0.1, 0.1, 0.15]))
+    assert calls == ["spherex_dr1"] and all(len(a) == 1 for a in answers)
+
+
+def test_snapshots_cover_the_five_test_targets_and_nothing_else(tmp_path, monkeypatch):
+    from spherex_viewer import cache as cache_module, pipeline, sia, snapshots
+
+    monkeypatch.setattr(sia, "default_cache", lambda: cache_module.DiskCache(tmp_path))    # nothing searched yet
+    monkeypatch.setattr(sia, "_refresh_later", lambda *args: None)                         # and nothing asked of IRSA
 
     for preset in resolve.PRESETS:
         target = resolve.resolve(preset["id"], epoch_to=2026.75)
@@ -502,6 +573,12 @@ def test_snapshots_cover_the_five_test_targets_and_nothing_else():
         assert snapshots.find("frames", dict(params, flags=True)) is None        # flags are always read live
         nudged = dict(params, dec=params["dec"] + 3.0 / 3600.0)      # the next quarter's centre is still served
         assert snapshots.find("frames", nudged) is not None
+        # the image search goes with them, so no view of a test target waits for IRSA's search
+        wide = max(pipeline.search_radius_deg(preset["fov"]), sia.SHARED_RADIUS_DEG)
+        rows = snapshots.search(params["ra"], params["dec"], wide)
+        assert rows, preset["id"]
+        assert len(sia.cached_exposures(params["ra"], params["dec"], pipeline.search_radius_deg(preset["fov"])) or []) \
+            >= saved["n_selected"]
         assert snapshots.find("frames", dict(params, dec=params["dec"] + 60.0 / 3600.0)) is None
         assert snapshots.find("frames", dict(params, fov=params["fov"] + 2.0)) is None
         field = saved["target"]
@@ -509,6 +586,25 @@ def test_snapshots_cover_the_five_test_targets_and_nothing_else():
             "ra": target["ra"], "dec": target["dec"], "pmra": target["pmra"], "pmdec": target["pmdec"],
             "epoch": 2000.0, "r_ap": 2.0, "field": {"ra": field["ra"], "dec": field["dec"], "fov": field["fov_arcmin"]}}))
         assert spectrum is not None and spectrum["points"], preset["id"]
+
+
+def test_live_status_follows_the_background_reading_of_a_field(monkeypatch):
+    from spherex_viewer import pipeline
+
+    monkeypatch.setattr(pipeline, "cached_exposures", lambda *args: None)
+    p = pipeline.normalise_frame_params({"ra": 123.4, "dec": -5.6, "fov": 8})
+    key = pipeline._field_key(p)
+    assert pipeline.live_status(p)["state"] == "idle"
+    with pipeline._warm_lock:
+        pipeline._warming.add(key)
+        pipeline._warm_progress[key] = (100, 400, "read 100/400 exposures")
+    try:
+        st = pipeline.live_status(dict(p, max_exposures=None))
+        assert st["state"] == "reading" and st["progress"] == 0.25 and st["message"].startswith("read 100/400")
+    finally:
+        with pipeline._warm_lock:
+            pipeline._warming.discard(key)
+            pipeline._warm_progress.pop(key, None)
 
 
 def test_frames_fall_back_to_the_snapshot_when_the_archive_fails(tmp_path, monkeypatch):

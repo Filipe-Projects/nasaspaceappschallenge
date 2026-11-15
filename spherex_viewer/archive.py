@@ -229,6 +229,8 @@ class ArchiveState:
 
 _states: dict[str, ArchiveState] = {}
 _states_guard = threading.Lock()
+# Locks taken per file, striped: one lock per file would pile up for every file ever read.
+_FILE_LOCKS = [threading.RLock() for _ in range(512)]
 
 
 def shared_state(cache: DiskCache) -> ArchiveState:
@@ -277,7 +279,16 @@ class Archive:
 
     # ------------------------------------------------------------------ cutouts
     def image_cutout(self, exp: Exposure, ra, dec, pad: int = 2, want_flags: bool = False) -> Cutout | None:
-        """Cutout covering the sky points (plus *pad* pixels), or None if off-detector."""
+        """Cutout covering the sky points (plus *pad* pixels), or None if off-detector.
+
+        Two jobs that want the same file at once (the background read of a test
+        target and a visitor's own view of it) take turns: the second finds the
+        window the first has just stored instead of asking IRSA for it again.
+        """
+        with _FILE_LOCKS[hash(exp.url) % len(_FILE_LOCKS)]:
+            return self._image_cutout(exp, ra, dec, pad, want_flags)
+
+    def _image_cutout(self, exp: Exposure, ra, dec, pad: int, want_flags: bool) -> Cutout | None:
         ra = np.atleast_1d(np.asarray(ra, dtype=float))
         dec = np.atleast_1d(np.asarray(dec, dtype=float))
         info = self.state.info(exp.url)

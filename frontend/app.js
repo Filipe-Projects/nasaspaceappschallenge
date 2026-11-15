@@ -1230,11 +1230,16 @@
     buildSequence();
     syncAvailability();
   }
-  async function loadFrames() {
+  /**
+   * Loads the frames of the field on show. With *live*, it swaps a saved copy for the frames the
+   * server has just read from IRSA, without stopping the film or flashing the progress bar.
+   */
+  async function loadFrames(live = false) {
     if (!state.target) return;
     clearError();
     const token = ++state.loadToken;
-    setPlaying(false);
+    const wasPlaying = state.playing;
+    if (!live) setPlaying(false);
     const t = state.target, kind = seqKind();
     const body = { ra: t.ra_now, dec: t.dec_now, fov: parseFloat($('#fov').value), group: kind,
       detector: kind === 'exposure' ? band() : 'ALL', flags: $('#chk-flags').checked };
@@ -1245,10 +1250,11 @@
     renderTarget();
     updateUrl();
     draw();
-    setProgress(true, 0, 'Searching the archive');
+    if (!live) setProgress(true, 0, 'Searching the archive');
     try {
       const began = Date.now();
       const { result, job } = await runJob('frames', body, (st) => {
+        if (live) return;
         const waiting = /^searching/.test(st.message || '') && Date.now() - began > 12000;
         setProgress(true, st.progress, waiting ? 'The archive is slow to answer. Still searching' : statusText(st.message));
       }, () => token === state.loadToken);
@@ -1283,12 +1289,42 @@
         if (own && own.saturated && own.curve && Object.keys(own.curve).length) { state.selected = own; $('#lc-kind').value = 'epoch'; renderChanges(); renderSources(); }
       }
       if (!sameField || !state.spectrum) measureAt(t.ra, t.dec, { pmra: t.pmra, pmdec: t.pmdec, epoch: t.epoch || 2000, name: t.source === 'coordinates' ? null : pretty(t.name), isTarget: true }, false);
+      else if (live && state.spectrum.snapshot && state.probe) {         // the saved spectrum goes with the saved frames
+        const p = state.probe;
+        measureAt(p.ra, p.dec, { pmra: p.pmra, pmdec: p.pmdec, epoch: p.epoch, name: p.name, isTarget: p.isTarget }, false);
+      }
       const calm = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-      if (group() === 'epoch' && state.sequence.length > 1 && !calm) setPlaying(true);
+      if (live ? wasPlaying : group() === 'epoch' && state.sequence.length > 1 && !calm) setPlaying(true);
+      if (result.snapshot) followLive(token, body);
     } catch (e) {
       if (e.message === 'cancelled' || token !== state.loadToken) return;
       setProgress(false);
-      showError(plainError(e.message), true);
+      if (!live) showError(plainError(e.message), true);              // a failed swap leaves the saved copy on show
+    }
+  }
+  /**
+   * A test target opens on its saved copy while the server reads the same field from IRSA. That
+   * reading is shown over the image as it goes, and its frames take the copy's place when it is done.
+   */
+  async function followLive(token, body) {
+    for (;;) {
+      await sleep(1000);
+      if (token !== state.loadToken) return;
+      let st;
+      try {
+        st = await api('/api/live', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      } catch (e) {
+        st = { state: 'failed' };
+      }
+      if (token !== state.loadToken) return;
+      if (st.state === 'reading') {
+        const doing = statusText(st.message).replace(/ from IRSA$/, '').replace(/ the IRSA archive$/, ' the archive');
+        setProgress(true, st.progress, `Live from IRSA · ${doing}`);
+        continue;
+      }
+      if (st.state === 'ready') { loadFrames(true); return; }
+      setProgress(false);
+      return;
     }
   }
   function populateEpochSelects() {

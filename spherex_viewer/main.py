@@ -213,6 +213,12 @@ def api_frames(req: FramesRequest) -> dict:
     return jobs.submit("frames", params, pipeline.build_frames).status()
 
 
+@app.post("/api/live")
+def api_live(req: FramesRequest) -> dict:
+    """Progress of the live reading of a field whose saved copy is on show."""
+    return pipeline.live_status(req.model_dump())
+
+
 @app.post("/api/jobs/spectrum")
 def api_spectrum(req: SpectrumRequest) -> dict:
     params = pipeline.normalise_spectrum_params(req.model_dump())

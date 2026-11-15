@@ -3,8 +3,8 @@
 The viewer reads everything live from IRSA.  When the archive is down, a field
 that is not in the disk cache cannot be shown at all, and the five test targets
 listed under the search box are the first thing a visitor tries.  ``scripts/snapshot.py``
-therefore stores the finished frame set and the target spectrum of each of
-them in this package (gzip JSON, a few megabytes in total).  A snapshot is shown
+therefore stores the finished frame set, the target spectrum and the image
+search of each of them in this package (gzip JSON, a few megabytes in total).  A snapshot is shown
 while the same field is being read from IRSA for the first time, and whenever
 that fails; the answer carries the date it was saved, and the viewer shows it.
 """
@@ -52,6 +52,9 @@ def has(kind: str, params: dict) -> bool:
 
 
 def _matches(kind: str, saved: dict, params: dict) -> bool:
+    if kind == "search":
+        return (abs(saved["radius"] - params["radius"]) < 1e-4
+                and _separation_arcsec(saved["ra"], saved["dec"], params["ra"], params["dec"]) < FIELD_TOLERANCE_ARCSEC)
     if kind == "frames":
         return (saved.get("group") == params.get("group") and saved.get("detector") == params.get("detector")
                 and bool(saved.get("flags")) == bool(params.get("flags"))
@@ -96,6 +99,17 @@ def find(kind: str, params: dict) -> dict | None:
                 _loaded[key] = result
         return dict(result)
     return None
+
+
+def search(ra: float, dec: float, radius_deg: float) -> list[dict] | None:
+    """The saved image search around a test target (rows of ``sia.Exposure``), or None.
+
+    IRSA's image search is the slowest step of a new field (a minute on a bad
+    day), so the test targets carry theirs: any view of them starts reading
+    files at once, while the search is renewed in the background.
+    """
+    found = find("search", {"ra": ra, "dec": dec, "radius": radius_deg})
+    return found["exposures"] if found else None
 
 
 def save(kind: str, name: str, params: dict, result: dict) -> Path:

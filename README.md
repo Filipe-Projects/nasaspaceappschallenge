@@ -132,14 +132,18 @@ Everything is read live from IRSA, and IRSA has bad hours. The viewer is built s
 that this costs a visitor as little as possible:
 
 * **The five test targets always open, in about three seconds.** Their finished
-  frames and target spectra are saved inside the package
-  (`spherex_viewer/snapshots/`, 6 MB, written by `scripts/snapshot.py`). On a
-  server that has never read a target, the saved copy is shown at once and the
-  field is read from IRSA in the background; the next visit gets the live result.
-  If IRSA cannot be reached the saved copy stays, and the page says which date it
-  is from.
+  frames, target spectra and image searches are saved inside the package
+  (`spherex_viewer/snapshots/`, written by `scripts/snapshot.py`). On a server
+  that has never read a target, the saved copy is shown at once while the field
+  is read from IRSA; the reading shows over the image as it goes, and the live
+  frames replace the copy when they are in. If IRSA cannot be reached the saved
+  copy stays, and the page says which date it is from.
 * **A field seen before never waits for the search.** An old cached search is
   answered immediately and renewed in the background.
+* **One search serves every view of a field.** IRSA takes as long to search a
+  small circle as a 15′ one, so fields up to 15′ share one search around their
+  centre and each view (another field of view, single exposures, a spectrum) is
+  cut from it. The same search or file asked for twice at once goes to IRSA once.
 * **Nothing incomplete is remembered.** A result with exposures that failed to
   read, or with a release that could not be searched, is shown with a notice and
   is not cached, so the next load tries again.
@@ -185,6 +189,7 @@ Offline, a few seconds:
 python scripts/precache.py                              # warm the cache for the five targets
 python scripts/precache.py wise0855 --fov 8 --spectrum
 python scripts/snapshot.py                              # renew spherex_viewer/snapshots/, then commit them
+python scripts/snapshot.py --searches                   # only the saved image searches
 ```
 
 ### Settings (environment variables)
@@ -245,6 +250,7 @@ embedded. The save menu copies both the link and the `<iframe>` code.
 | `GET /api/presets` | The five test targets, resolved |
 | `GET /api/exposures?ra&dec&fov` | Epochs and exposure counts for a field |
 | `POST /api/jobs/frames` `{ra, dec, fov, group, detector, flags}` | Start a frame job. Poll `GET /api/jobs/{id}`, then `GET /api/jobs/{id}/result`; `GET /api/jobs/{id}/fits` returns the frames as FITS |
+| `POST /api/live` (same body as a frame job) | While a saved copy is on show: progress of the live reading of that field, then `ready` |
 | `POST /api/jobs/spectrum` `{ra, dec, pmra, pmdec, epoch, r_ap, field}` | Photometry of a position in every exposure |
 | `GET /api/catalog/{gaia\|catwise}?ra&dec&radius` | Catalogue overlay |
 | `GET /api/config` | Collections in use, limits, flag bits |

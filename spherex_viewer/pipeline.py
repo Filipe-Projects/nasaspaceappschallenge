@@ -23,7 +23,7 @@ from .photometry import measure
 from .processing import (Epoch, ReprojectedFrame, TargetGrid, group_epochs, plan_grid,
                          reproject_cutout, select_exposures, stack_frames)
 from .resolve import propagate
-from .sia import Exposure, cached_exposures, find_exposures, mjd_to_iso, mjd_to_year, search_is_cached
+from .sia import Exposure, cached_exposures, find_exposures, mjd_to_iso, mjd_to_year
 
 log = logging.getLogger("spherex_viewer")
 
@@ -125,8 +125,9 @@ def normalise_frame_params(params: dict) -> dict:
     }
 
 
-# Fields being read from IRSA in the background while their saved copy is on show.
+# Fields being read from IRSA in the background while their saved copy is on show, and how far.
 _warming: set[tuple] = set()
+_warm_progress: dict[tuple, tuple[int, int, str]] = {}
 _warm_failed: dict[tuple, float] = {}
 # Live answers read in the background that could not go to the disk cache
 # (one exposure failed, or one release could not be searched): kept here so the
@@ -187,8 +188,13 @@ def warm(p: dict, workers: int | None = None) -> None:
         if key in _warming or time.time() - _warm_failed.get(key, 0.0) < WARM_RETRY_SECONDS:
             return
         _warming.add(key)
+
+    def note(done: int, total: int, message: str) -> None:
+        with _warm_lock:
+            _warm_progress[key] = (done, total, message)
+
     try:
-        result = _build_frames(p, lambda *_: None, workers=workers or WARM_WORKERS)
+        result = _build_frames(p, note, workers=workers or WARM_WORKERS)
         saved = snapshots.find("frames", p)
         if saved is not None and result["n_used"] < 0.5 * saved["n_used"]:
             raise RuntimeError("most exposures could not be read")
@@ -201,6 +207,28 @@ def warm(p: dict, workers: int | None = None) -> None:
     finally:
         with _warm_lock:
             _warming.discard(key)
+            _warm_progress.pop(key, None)
+
+
+def live_status(params: dict) -> dict:
+    """How far the live reading of a field shown from its saved copy has got.
+
+    ``reading`` (with progress and message as for a job), ``ready`` when the
+    live frames can be asked for, ``failed`` after a failed attempt (the saved
+    copy stays), or ``idle`` when nothing is being read.
+    """
+    p = normalise_frame_params(params)
+    key = _field_key(p)
+    with _warm_lock:
+        reading = key in _warming
+        done, total, message = _warm_progress.get(key, (0, 1, "searching the IRSA archive"))
+        failed = time.time() - _warm_failed.get(key, 0.0) < WARM_RETRY_SECONDS
+    if reading:
+        return {"state": "reading", "done": done, "total": total,
+                "progress": done / total if total else 0.0, "message": message}
+    if _ready_frames(p, check_only=True):
+        return {"state": "ready"}
+    return {"state": "failed" if failed else "idle"}
 
 
 def _warm_later(p: dict) -> None:
