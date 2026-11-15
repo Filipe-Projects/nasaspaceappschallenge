@@ -1,0 +1,383 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BeyondtheBlue</title>
+<meta name="description" content="Play back every SPHEREx visit to any patch of sky and see what moved or changed. NASA Space Apps 2026: Planet X and SPHEREx.">
+<meta name="theme-color" content="#1a40bf">
+<meta name="color-scheme" content="only light">
+<!-- Put your public repository URL here; the "Source code" link in the About box uses it. -->
+<meta name="repo" content="https://github.com/Filipe-Projects/nasaspaceappschallenge">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M7 2h9a7 7 0 0 1 0 14H7z' fill='%23d4292e'/%3E%3Cpath d='M7 16h11a7 7 0 0 1 0 14H7z' fill='%231a40bf'/%3E%3C/svg%3E">
+<link rel="preload" href="/static/fonts/poppins-400.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/static/fonts/poppins-700.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body class="is-start">
+<a class="skip-link" href="#viewer">Skip to the viewer</a>
+
+<header class="site-header">
+  <a class="logo" href="/" aria-label="BeyondtheBlue, start page">
+    <svg class="logo-mark" viewBox="0 0 32 32" aria-hidden="true"><path d="M7 2h9a7 7 0 0 1 0 14H7z" fill="#d4292e"/><path d="M7 16h11a7 7 0 0 1 0 14H7z" fill="#1a40bf"/></svg>
+    <span class="logo-word"><b>Beyond</b>the<b>Blue</b></span>
+  </a>
+  <div class="header-search" id="header-search-slot"></div>
+  <nav class="targets" id="presets" aria-label="Test targets">
+    <button type="button" data-id="barnard" data-fov="8">Barnard's Star</button>
+    <button type="button" data-id="epsindi-b" data-fov="15">Epsilon Indi B</button>
+    <button type="button" data-id="wise0855" data-fov="8">WISE 0855−0714</button>
+    <button type="button" data-id="rwaur" data-fov="8">RW Aurigae</button>
+    <button type="button" data-id="rdra" data-fov="8">R Draconis</button>
+  </nav>
+  <button id="btn-help" class="text-button" type="button">About</button>
+</header>
+
+<div id="error" class="notice hidden" role="alert">
+  <p id="error-text"></p>
+  <button id="btn-load" class="text-button" type="button">Try again</button>
+  <button id="btn-dismiss" class="icon-btn" type="button" aria-label="Dismiss">
+    <svg class="i" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+  </button>
+</div>
+
+<!-- start screen -->
+<section class="start" id="start">
+  <div class="start-inner">
+    <div class="start-copy">
+      <h1 class="display">Find what moved in the infrared sky</h1>
+      <p class="lead">Search a star or a position. Every SPHEREx visit to that patch of sky plays back as a short film.</p>
+      <div id="start-search-slot">
+        <form id="target-form" class="search" role="search">
+          <label class="visually-hidden" for="target-input">Star name or coordinates</label>
+          <input id="target-input" type="text" autocomplete="off" spellcheck="false" enterkeyhint="search"
+                 placeholder="Star name or coordinates"
+                 title="A name, or coordinates such as 08h55m10.8s -7d14m42.5s or 133.76 -7.24">
+          <label class="search-fov" title="Field of view">
+            <span>Field</span>
+            <select id="fov">
+              <option value="3">3′</option>
+              <option value="5">5′</option>
+              <option value="6">6′</option>
+              <option value="8" selected>8′</option>
+              <option value="10">10′</option>
+              <option value="12">12′</option>
+              <option value="15">15′</option>
+              <option value="20">20′</option>
+              <option value="30">30′</option>
+            </select>
+          </label>
+          <button type="submit" class="search-go">
+            <svg class="i" viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.6" cy="8.6" r="5.4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12.8 12.8L17 17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            <span>Search</span>
+          </button>
+        </form>
+      </div>
+    </div>
+    <figure class="start-figure">
+      <div class="blink">
+        <img src="/static/img/barnard-2025.webp" width="720" height="720" decoding="async" alt="SPHEREx image of the sky around Barnard's Star in August 2025">
+        <img src="/static/img/barnard-2026.webp" width="720" height="720" decoding="async" alt="The same patch of sky in August 2026: the star has moved north">
+      </div>
+      <figcaption>
+        <span>Barnard's Star, 5′ across</span>
+        <span class="blink-date"><span>August 2025</span><span>August 2026</span></span>
+      </figcaption>
+    </figure>
+  </div>
+  <ul class="start-targets" aria-label="Test targets">
+    <li><button type="button" data-id="barnard" data-fov="8"><small>Fastest-moving star</small><strong>Barnard's Star</strong></button></li>
+    <li><button type="button" data-id="epsindi-b" data-fov="15"><small>Brown-dwarf pair</small><strong>Epsilon Indi B</strong></button></li>
+    <li><button type="button" data-id="wise0855" data-fov="8"><small>Coldest brown dwarf</small><strong>WISE 0855−0714</strong></button></li>
+    <li><button type="button" data-id="rwaur" data-fov="8"><small>Young variable star</small><strong>RW Aurigae</strong></button></li>
+    <li><button type="button" data-id="rdra" data-fov="8"><small>Pulsating red giant</small><strong>R Draconis</strong></button></li>
+  </ul>
+</section>
+
+<!-- workspace -->
+<main class="workspace" id="viewer">
+  <section class="sky" aria-label="Sky viewer">
+    <aside class="rail">
+      <fieldset class="opts" id="view-seg">
+        <legend>View</legend>
+        <label title="Play every visit in turn"><input type="radio" name="view" value="normal" checked><span>Epochs</span></label>
+        <label title="Alternate between two visits"><input type="radio" name="view" value="blink"><span>Blink</span></label>
+        <label title="Subtract a reference visit"><input type="radio" name="view" value="diff"><span>Difference</span></label>
+        <label title="Add all visits together"><input type="radio" name="view" value="sum"><span>Sum</span></label>
+        <label title="Step through single exposures"><input type="radio" name="view" value="exposure"><span>Exposures</span></label>
+      </fieldset>
+
+      <fieldset class="opts" id="band-seg">
+        <legend>Band <output id="band-range" class="band-range">0.75–5.01 µm</output></legend>
+        <div class="band-grid">
+          <label class="band-all" title="All six bands, 0.75–5.01 µm"><input type="radio" name="band" value="ALL" checked><span>All</span></label>
+          <label class="band-colour" title="Three colours: bands 1–2 in blue, 3–4 in green, 5–6 in red. Cold objects come out red"><input type="radio" name="band" value="RGB"><span>Colour</span></label>
+          <label title="Band 1, 0.75–1.11 µm"><input type="radio" name="band" value="D1"><span>1</span></label>
+          <label title="Band 2, 1.10–1.65 µm"><input type="radio" name="band" value="D2"><span>2</span></label>
+          <label title="Band 3, 1.63–2.43 µm"><input type="radio" name="band" value="D3"><span>3</span></label>
+          <label title="Band 4, 2.40–3.85 µm"><input type="radio" name="band" value="D4"><span>4</span></label>
+          <label title="Band 5, 3.81–4.43 µm"><input type="radio" name="band" value="D5"><span>5</span></label>
+          <label title="Band 6, 4.41–5.01 µm"><input type="radio" name="band" value="D6"><span>6</span></label>
+        </div>
+      </fieldset>
+
+      <fieldset class="opts opts-layers">
+        <legend>Overlays</legend>
+        <label title="Catalogue position of the target at the date of each frame">
+          <input id="chk-target" type="checkbox" checked>
+          <span><svg class="glyph" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1v4.4M8 10.6V15M1 8h4.4M10.6 8H15" fill="none" stroke="#fff" stroke-width="1.7"/></svg>Target<i class="switch"></i></span>
+        </label>
+        <label title="Sources found to move or vary between epochs">
+          <input id="chk-changes" type="checkbox" checked>
+          <span><svg class="glyph" viewBox="0 0 16 16" aria-hidden="true"><circle cx="6.4" cy="9.6" r="4" fill="none" stroke="#ffd23f" stroke-width="1.7"/><path d="M9.8 6.2L14.2 1.8M10.6 1.6h3.8v3.8" fill="none" stroke="#ffd23f" stroke-width="1.7"/></svg>Changes<i class="switch"></i></span>
+        </label>
+        <label title="Gaia DR3 stars, moved to the date of each frame">
+          <input id="chk-gaia" type="checkbox">
+          <span><svg class="glyph" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5" fill="none" stroke="#7cc4ff" stroke-width="1.7"/></svg>Gaia DR3<i class="switch"></i></span>
+        </label>
+        <label title="CatWISE2020 infrared sources, including cold brown dwarfs">
+          <input id="chk-catwise" type="checkbox">
+          <span><svg class="glyph" viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="3" width="10" height="10" fill="none" stroke="#ff9d8a" stroke-width="1.7"/></svg>CatWISE<i class="switch"></i></span>
+        </label>
+        <details class="fold more" id="more-overlays">
+          <summary>More</summary>
+          <label title="SPHEREx pixel flags. Reads about 0.4 MB more per exposure">
+            <input id="chk-flags" type="checkbox">
+            <span><svg class="glyph" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 2h5.4v5.4H2z" fill="#ff5d52"/><path d="M8.6 2H14v5.4H8.6z" fill="#ffd23f"/><path d="M2 8.6h5.4V14H2z" fill="#7cc4ff"/></svg>Pixel flags<i class="switch"></i></span>
+          </label>
+
+          <details class="fold track" id="track">
+            <summary title="Shift the frames along a proper motion, so that an object moving that way stays put">
+              <svg class="glyph" viewBox="0 0 16 16" aria-hidden="true"><circle cx="3.6" cy="12.4" r="1.9" fill="#fff"/><path d="M6.4 9.6L13.6 2.4M9 2.2h4.8V7" fill="none" stroke="#fff" stroke-width="1.7"/></svg>Follow motion
+            </summary>
+            <div class="track-body">
+              <label class="field">RA, mas/yr
+                <input id="pmra" type="text" inputmode="decimal" value="0" title="Proper motion in right ascension, including cos(dec)">
+              </label>
+              <label class="field">Dec, mas/yr
+                <input id="pmdec" type="text" inputmode="decimal" value="0" title="Proper motion in declination">
+              </label>
+              <button id="btn-track-target" type="button" class="small-btn">Use the target's</button>
+              <button id="btn-track-source" type="button" class="small-btn">Use the selected</button>
+              <label class="check"><input id="chk-track" type="checkbox"> Follow</label>
+            </div>
+          </details>
+        </details>
+      </fieldset>
+    </aside>
+
+    <div class="sky-main">
+      <div class="stage is-empty" id="canvas-wrap">
+        <canvas id="view" width="600" height="600"></canvas>
+        <div id="progress" class="stage-status hidden" role="status">
+          <p id="progress-text"></p>
+          <div class="bar"><div id="progress-fill" class="fill"></div></div>
+        </div>
+        <div id="readout" class="readout" aria-hidden="true"></div>
+      </div>
+
+      <div class="frame-row">
+        <p class="frame-label"><strong id="frame-title"></strong><span id="frame-sub"></span></p>
+        <a id="open-full" class="open-full" target="_blank" rel="noopener">BeyondtheBlue</a>
+        <div class="frame-side">
+          <label id="ref-wrap" class="inline-field hidden"><span id="ref-label">Minus</span> <select id="ref-epoch"></select></label>
+          <label id="blink-wrap" class="inline-field hidden">and <select id="blink-b"></select></label>
+          <div id="legend" class="legend"></div>
+        </div>
+      </div>
+
+      <div class="transport">
+        <button id="btn-prev" class="icon-btn" type="button" title="Previous frame (left arrow)" aria-label="Previous frame">
+          <svg class="i" viewBox="0 0 20 20" aria-hidden="true"><path d="M4.5 4h2.2v12H4.5zM16 4v12L7.6 10z" fill="currentColor"/></svg>
+        </button>
+        <button id="btn-play" class="play" type="button" title="Play or pause (space)" aria-label="Play">
+          <svg class="i i-play" viewBox="0 0 20 20" aria-hidden="true"><path d="M6.5 3.6v12.8L17 10z" fill="currentColor"/></svg>
+          <svg class="i i-pause" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 4h3.6v12H5zM11.4 4H15v12h-3.6z" fill="currentColor"/></svg>
+        </button>
+        <button id="btn-next" class="icon-btn" type="button" title="Next frame (right arrow)" aria-label="Next frame">
+          <svg class="i" viewBox="0 0 20 20" aria-hidden="true"><path d="M13.3 4h2.2v12h-2.2zM4 4l8.4 6L4 16z" fill="currentColor"/></svg>
+        </button>
+        <input id="frame-slider" class="scrub" type="range" min="0" max="0" value="0" step="1" aria-label="Frame">
+        <output id="frame-count" class="count" for="frame-slider"></output>
+        <label class="contrast" title="Contrast">
+          <svg class="i" viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="6.8" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M10 3.2a6.8 6.8 0 0 1 0 13.6z" fill="currentColor"/></svg>
+          <input id="contrast" type="range" min="0" max="100" value="55" aria-label="Contrast">
+        </label>
+
+        <details class="menu" id="menu-display">
+          <summary class="icon-btn" title="Display" aria-label="Display options">
+            <svg class="i" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h6.6M14.4 6H17M3 14h2.6M10.4 14H17" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><circle cx="12" cy="6" r="2.2" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="8" cy="14" r="2.2" fill="none" stroke="currentColor" stroke-width="1.7"/></svg>
+          </summary>
+          <div class="menu-panel">
+            <label class="field">Speed
+              <select id="fps">
+                <option value="0.5">0.5 fps</option>
+                <option value="1">1 fps</option>
+                <option value="2" selected>2 fps</option>
+                <option value="3">3 fps</option>
+                <option value="4">4 fps</option>
+                <option value="6">6 fps</option>
+                <option value="8">8 fps</option>
+              </select>
+            </label>
+            <label class="field">Stretch
+              <select id="stretch">
+                <option value="asinh" selected>Asinh</option>
+                <option value="linear">Linear</option>
+                <option value="sqrt">Square root</option>
+                <option value="log">Logarithmic</option>
+              </select>
+            </label>
+            <label class="field">Colour
+              <select id="cmap">
+                <option value="gray" selected>Grey</option>
+                <option value="inferno">Inferno</option>
+                <option value="viridis">Viridis</option>
+              </select>
+            </label>
+            <label class="check"><input id="chk-smooth" type="checkbox" checked> Smooth pixels</label>
+            <label class="check"><input id="chk-invert" type="checkbox"> Dark on light</label>
+            <label class="check"><input id="chk-grid" type="checkbox" checked> Scale and compass</label>
+            <label class="check"><input id="chk-border" type="checkbox" checked> Mark the first frame</label>
+          </div>
+        </details>
+
+        <details class="menu" id="menu-save">
+          <summary class="icon-btn" title="Save" aria-label="Save or share">
+            <svg class="i" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v9M6.2 8.6L10 12.4l3.8-3.8M4 16h12" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </summary>
+          <div class="menu-panel menu-list">
+            <button id="btn-video" type="button" disabled><span>Video</span><small>WebM</small></button>
+            <button id="btn-png" type="button" disabled><span>This frame</span><small>PNG</small></button>
+            <button id="btn-fits" type="button" disabled><span>All frames</span><small>FITS</small></button>
+            <button id="btn-link" type="button"><span>Copy link</span></button>
+            <button id="btn-embed" type="button"><span>Copy embed code</span><small>HTML</small></button>
+          </div>
+        </details>
+      </div>
+
+      <details class="fold sheet hidden" id="sheet" open>
+        <summary>All frames</summary>
+        <div id="thumbs" class="thumbs"></div>
+      </details>
+    </div>
+  </section>
+
+  <section class="report" aria-label="Measurements">
+    <header id="target-info" class="target"></header>
+
+    <section class="changes" id="changes">
+      <div class="section-head">
+        <h2>What changed</h2>
+        <span id="changes-summary" class="muted"></span>
+      </div>
+      <div id="changes-list" class="changes-list"></div>
+    </section>
+
+    <div class="tabs" role="tablist">
+      <button class="tab active" data-tab="spectrum" role="tab" type="button" aria-selected="true">Spectrum</button>
+      <button class="tab" data-tab="lightcurve" role="tab" type="button" aria-selected="false">Light curve</button>
+      <button class="tab" data-tab="sources" role="tab" type="button" aria-selected="false">Sources</button>
+      <button class="tab" data-tab="context" role="tab" type="button" aria-selected="false">Surveys</button>
+      <button class="tab" data-tab="exposures" role="tab" type="button" aria-selected="false">Exposures</button>
+    </div>
+    <div class="tabpanes">
+      <div class="tabpane active" data-pane="spectrum">
+        <div class="pane-head">
+          <p id="spectrum-info" class="pane-title"></p>
+          <label class="inline-field">Aperture
+            <select id="aperture"><option value="1.5">1.5 px</option><option value="2" selected>2 px</option><option value="3">3 px</option></select>
+          </label>
+        </div>
+        <div id="spectrum-key" class="plot-key"></div>
+        <div id="spectrum-plot" class="plot"></div>
+        <p id="spectrum-note" class="pane-note"></p>
+      </div>
+      <div class="tabpane" data-pane="lightcurve">
+        <div class="pane-head">
+          <p id="lightcurve-info" class="pane-title"></p>
+          <select id="lc-kind" aria-label="Light curve from">
+            <option value="exposure" selected>Every exposure</option>
+            <option value="epoch">Epoch stacks</option>
+          </select>
+        </div>
+        <div id="lightcurve-key" class="plot-key"></div>
+        <div id="lightcurve-plot" class="plot"></div>
+      </div>
+      <div class="tabpane" data-pane="sources">
+        <p id="sources-info" class="pane-note"></p>
+        <div class="table-wrap"><table id="sources-table"><thead><tr><th>#</th><th>Position</th><th class="num">Flux, mJy</th><th class="num">Motion, ″/yr</th><th class="num" title="Significance of the motion">σ</th><th class="num" title="Largest change in brightness">Δ flux</th><th>Notes</th></tr></thead><tbody></tbody></table></div>
+      </div>
+      <div class="tabpane" data-pane="context">
+        <div class="pane-head">
+          <p id="context-note" class="pane-title"></p>
+          <select id="context-layer" aria-label="Survey">
+            <option value="unwise-neo7" selected>unWISE, 3.4 and 4.6 µm</option>
+            <option value="ls-dr10">Legacy Surveys DR10, optical</option>
+            <option value="aladin">Aladin Lite</option>
+          </select>
+        </div>
+        <div id="context-image" class="context-image"><img id="context-img" alt="Survey image of the field"><span class="cross" aria-hidden="true"></span></div>
+        <div id="aladin" class="aladin hidden"></div>
+      </div>
+      <div class="tabpane" data-pane="exposures">
+        <p id="exposures-info" class="pane-note"></p>
+        <div class="table-wrap"><table id="exposures-table"><thead><tr><th>Date, UTC</th><th>Band</th><th>Epoch</th><th>Release</th><th>Used</th></tr></thead><tbody></tbody></table></div>
+      </div>
+    </div>
+
+    <p class="credit">Data: SPHEREx, NASA/JPL-Caltech, served by IRSA<span id="saved-note"></span></p>
+  </section>
+</main>
+
+<dialog id="help">
+  <article>
+    <form method="dialog"><button class="icon-btn dialog-close" aria-label="Close">
+      <svg class="i" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button></form>
+    <h2>BeyondtheBlue</h2>
+    <p class="lead">SPHEREx returns to each patch of sky about every six months. BeyondtheBlue lines those visits up and plays them back, so anything that moved or changed brightness stands out.</p>
+    <details class="fold">
+      <summary>How it works</summary>
+      <ol class="steps">
+        <li><strong>Search.</strong> IRSA lists every SPHEREx image that covers the position.</li>
+        <li><strong>Cut out.</strong> Only the pixels around the target are read from each 70 MB file.</li>
+        <li><strong>Align and stack.</strong> Cutouts go onto one north-up grid and each visit is averaged per detector band.</li>
+        <li><strong>Compare.</strong> Every bright source is measured in every epoch; the ones that moved or varied are listed.</li>
+      </ol>
+    </details>
+    <details class="fold">
+      <summary>Shortcuts</summary>
+      <dl class="keys">
+        <div><dt><kbd>Space</kbd></dt><dd>Play or pause</dd></div>
+        <div><dt><kbd>←</kbd> <kbd>→</kbd></dt><dd>Step one frame</dd></div>
+        <div><dt>Click</dt><dd>Measure the spectrum of a source</dd></div>
+      </dl>
+    </details>
+    <details class="fold">
+      <summary>Data and limits</summary>
+      <p class="fine">Quick-look measurements: fixed apertures, no PSF fitting. Data: SPHEREx, NASA/JPL-Caltech, via IRSA. Catalogues: Gaia DR3 (ESA), CatWISE2020. Survey images: Legacy Surveys, Aladin Lite (CDS).</p>
+    </details>
+    <p class="links">
+      <a href="https://irsa.ipac.caltech.edu/Missions/spherex.html" target="_blank" rel="noopener">SPHEREx at IRSA</a>
+      <a href="https://www.spaceappschallenge.org/2026/challenges/planet-x-and-spherex/" target="_blank" rel="noopener">The challenge</a>
+      <a id="link-github" href="#" target="_blank" rel="noopener">Source code</a>
+    </p>
+  </article>
+</dialog>
+
+<script>
+  /* Pick the layout before the first paint: a link with a target opens straight on the viewer. */
+  (function () {
+    var q = new URLSearchParams(location.search), b = document.body;
+    if (q.get('embed') === '1') b.classList.add('embed');
+    if (q.get('target') || (q.get('ra') && q.get('dec'))) {
+      b.classList.replace('is-start', 'is-working');
+      document.getElementById('header-search-slot').appendChild(document.getElementById('target-form'));
+    }
+  })();
+</script>
+<script src="/static/vendor/plotly-basic-2.35.2.min.js" charset="utf-8" async data-plotly></script>
+<script src="/static/app.js" defer></script>
+</body>
+</html>

@@ -1,0 +1,25 @@
+# Render.com blueprint: deploys the viewer as a Docker web service.
+# Pick a US region (Oregon/Ohio/Virginia): every cutout is a round trip to
+# IRSA in California, so latency matters more than CPU.
+#
+# The disk keeps the cache across restarts and needs a paid plan.  On the free
+# plan delete the "disk" block and set SPHEREX_CACHE_DIR to /tmp/cache: the
+# viewer works the same, it only re-reads from IRSA after each restart.
+services:
+  - type: web
+    name: beyondtheblue
+    runtime: docker
+    region: oregon
+    plan: starter
+    healthCheckPath: /api/health
+    envVars:
+      - key: SPHEREX_CACHE_DIR
+        value: /data/cache
+      - key: SPHEREX_WARMUP
+        value: "1"
+      - key: SPHEREX_MAX_WORKERS
+        value: "16"
+    disk:
+      name: cache
+      mountPath: /data
+      sizeGB: 5

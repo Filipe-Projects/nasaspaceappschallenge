@@ -1,0 +1,172 @@
+[
+ {
+  "kind": "frames",
+  "file": "barnard-frames.json.gz",
+  "saved": "2026-11-15",
+  "params": {
+   "ra": 269.446101,
+   "dec": 4.770363,
+   "fov": 8.0,
+   "group": "epoch",
+   "detector": "ALL",
+   "flags": false,
+   "mask": [],
+   "max_exposures": 800
+  }
+ },
+ {
+  "kind": "spectrum",
+  "file": "barnard-spectrum.json.gz",
+  "saved": "2026-11-15",
+  "params": {
+   "ra": 269.452077,
+   "dec": 4.693365,
+   "pmra": -801.551,
+   "pmdec": 10362.394,
+   "epoch": 2000.0,
+   "r_ap": 2.0,
+   "field": {
+    "ra": 269.446101,
+    "dec": 4.770363,
+    "fov": 8.0
+   },
+   "max_exposures": 800
+  }
+ },
+ {
+  "kind": "frames",
+  "file": "epsindi-b-frames.json.gz",
+  "saved": "2026-11-15",
+  "params": {
+   "ra": 331.098158,
+   "dec": -56.801174,
+   "fov": 15.0,
+   "group": "epoch",
+   "detector": "ALL",
+   "flags": false,
+   "mask": [],
+   "max_exposures": 800
+  }
+ },
+ {
+  "kind": "spectrum",
+  "file": "epsindi-b-spectrum.json.gz",
+  "saved": "2026-11-15",
+  "params": {
+   "ra": 331.044147,
+   "dec": -56.782844,
+   "pmra": 3981.977,
+   "pmdec": -2466.832,
+   "epoch": 2000.0,
+   "r_ap": 2.0,
+   "field": {
+    "ra": 331.098158,
+    "dec": -56.801174,
+    "fov": 15.0
+   },
+   "max_exposures": 800
+  }
+ },
+ {
+  "kind": "frames",
+  "file": "rdra-frames.json.gz",
+  "saved": "2026-11-15",
+  "params": {
+   "ra": 248.167222,
+   "dec": 66.755025,
+   "fov": 8.0,
+   "group": "epoch",
+   "detector": "ALL",
+   "flags": false,
+   "mask": [],
+   "max_exposures": 800
+  }
+ },
+ {
+  "kind": "spectrum",
+  "file": "rdra-spectrum.json.gz",
+  "saved": "2026-11-15",
+  "params": {
+   "ra": 248.167611,
+   "dec": 66.754979,
+   "pmra": -20.643,
+   "pmdec": 6.149,
+   "epoch": 2000.0,
+   "r_ap": 2.0,
+   "field": {
+    "ra": 248.167222,
+    "dec": 66.755025,
+    "fov": 8.0
+   },
+   "max_exposures": 800
+  }
+ },
+ {
+  "kind": "frames",
+  "file": "rwaur-frames.json.gz",
+  "saved": "2026-11-15",
+  "params": {
+   "ra": 76.956588,
+   "dec": 30.401287,
+   "fov": 8.0,
+   "group": "epoch",
+   "detector": "ALL",
+   "flags": false,
+   "mask": [],
+   "max_exposures": 800
+  }
+ },
+ {
+  "kind": "spectrum",
+  "file": "rwaur-spectrum.json.gz",
+  "saved": "2026-11-15",
+  "params": {
+   "ra": 76.956526,
+   "dec": 30.401438,
+   "pmra": 7.23,
+   "pmdec": -20.33,
+   "epoch": 2000.0,
+   "r_ap": 2.0,
+   "field": {
+    "ra": 76.956588,
+    "dec": 30.401287,
+    "fov": 8.0
+   },
+   "max_exposures": 800
+  }
+ },
+ {
+  "kind": "frames",
+  "file": "wise0855-frames.json.gz",
+  "saved": "2026-11-15",
+  "params": {
+   "ra": 133.758059,
+   "dec": -7.242046,
+   "fov": 8.0,
+   "group": "epoch",
+   "detector": "ALL",
+   "flags": false,
+   "mask": [],
+   "max_exposures": 800
+  }
+ },
+ {
+  "kind": "spectrum",
+  "file": "wise0855-spectrum.json.gz",
+  "saved": "2026-11-15",
+  "params": {
+   "ra": 133.818908,
+   "dec": -7.247048,
+   "pmra": -8123.7,
+   "pmdec": 673.2,
+   "epoch": 2000.0,
+   "r_ap": 2.0,
+   "field": {
+    "ra": 133.758059,
+    "dec": -7.242046,
+    "fov": 8.0
+   },
+   "max_exposures": 800
+  }
+ }
+]
