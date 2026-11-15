@@ -54,7 +54,7 @@
     config: null, target: null, result: null, frames: [], wcs: null, jobId: null,
     sequence: [], seqPos: 0, playing: false, timer: null, loadToken: 0,
     spectrum: null, probe: null, selected: null, hover: null, fullRange: false,
-    hiddenEpochs: new Set(), hiddenBands: new Set(), detailsOpen: false, changesOpen: false,
+    hiddenEpochs: new Set(), hiddenBands: new Set(), changesOpen: false,
     catalogs: { gaia: null, catwise: null },
     aladin: null, recording: false,
     shiftCache: new Map(), diffCache: new Map(), sumCache: new Map(), levelCache: new Map(),
@@ -968,12 +968,113 @@
   function showWorkspace() {
     if (!document.body.classList.contains('is-start')) return;
     document.body.classList.replace('is-start', 'is-working');
-    $('#header-search-slot').appendChild($('#target-form'));
+    $('#header-search-slot').appendChild($('#search-box'));
     window.scrollTo(0, 0);
   }
+
+  // ───────────────────────── search suggestions ─────────────────────────
+  // The challenge's test targets and the visitor's recent searches, listed under the
+  // search box when it is focused and filtered as they type.
+  const SUGGESTED = [
+    { id: 'barnard', name: 'Barnard’s Star', note: 'Fastest-moving star', fov: 8, keys: 'gj 699 v2500 oph' },
+    { id: 'epsindi-b', name: 'Epsilon Indi B', note: 'Brown-dwarf pair', fov: 15, keys: 'eps ind b' },
+    { id: 'wise0855', name: 'WISE 0855−0714', note: 'Coldest brown dwarf', fov: 8, keys: 'w0855 wise j085510' },
+    { id: 'rwaur', name: 'RW Aurigae', note: 'Young variable star', fov: 8, keys: 'rw aur' },
+    { id: 'rdra', name: 'R Draconis', note: 'Pulsating red giant', fov: 8, keys: 'r dra' },
+  ];
+  const RECENT_KEY = 'recent-targets';
+  const searchInput = $('#target-input'), suggestList = $('#target-suggest');
+  let suggestItems = [], suggestActive = -1;
+  /** Text reduced to lower-case letters and digits, for matching "rw aur" against "RW Aurigae". */
+  const fold = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+  const looksLikePosition = (q) => /\d/.test(q) && /^[\d\s.,:;+\-−hmsd°'"′″]+$/i.test(q);
+  function readRecent() {
+    try {
+      const list = JSON.parse(localStorage.getItem(RECENT_KEY) || '[]');
+      return Array.isArray(list) ? list.filter((r) => r && typeof r.q === 'string' && typeof r.label === 'string') : [];
+    } catch (e) { return []; }
+  }
+  function rememberTarget(t, query) {
+    if (t.source === 'preset') return;                     // the test targets are always listed anyway
+    const label = t.source === 'coordinates' ? query : pretty(t.name);
+    const list = [{ q: query, label }, ...readRecent().filter((r) => fold(r.label) !== fold(label))].slice(0, 5);
+    try { localStorage.setItem(RECENT_KEY, JSON.stringify(list)); } catch (e) { /* storage is optional */ }
+  }
+  function setSuggestOpen(open) {
+    suggestList.classList.toggle('hidden', !open);
+    searchInput.setAttribute('aria-expanded', String(open));
+    if (!open) markSuggest(-1);
+  }
+  function markSuggest(i) {
+    suggestActive = i;
+    $$('#target-suggest [role=option]').forEach((el, k) => el.setAttribute('aria-selected', String(k === i)));
+    const el = i >= 0 ? $(`#suggest-${i}`) : null;
+    if (el) { searchInput.setAttribute('aria-activedescendant', el.id); el.scrollIntoView({ block: 'nearest' }); }
+    else searchInput.removeAttribute('aria-activedescendant');
+  }
+  function renderSuggest() {
+    const q = searchInput.value.trim(), key = fold(q);
+    const hit = (...texts) => !key || texts.some((s) => fold(s).includes(key));
+    const recent = readRecent().filter((r) => hit(r.label, r.q)).slice(0, key ? 3 : 4);
+    const targets = SUGGESTED.filter((t) => hit(t.name, t.note, t.id, t.keys));
+    let html = '';
+    suggestItems = [];
+    const add = (item, inner) => {
+      const i = suggestItems.push(item) - 1;
+      html += `<li id="suggest-${i}" class="suggest-item" role="option" aria-selected="false" data-i="${i}">${inner}</li>`;
+    };
+    const group = (label) => { html += `<li class="suggest-group" role="presentation">${label}</li>`; };
+    if (q) add({ kind: 'query' }, `<span class="suggest-name"><span class="suggest-verb">${looksLikePosition(q) ? 'Go to' : 'Search'}</span> ${esc(q)}</span>`);
+    if (recent.length) {
+      group('Recent');
+      recent.forEach((r) => add({ kind: 'recent', q: r.q, label: r.label }, `<span class="suggest-name">${esc(r.label)}</span>`));
+    }
+    if (targets.length) {
+      group('Test targets');
+      targets.forEach((t) => add({ kind: 'preset', ...t }, `<span class="suggest-name">${esc(t.name)}</span><span class="suggest-note">${esc(t.note)}</span>`));
+    }
+    suggestList.innerHTML = html;
+    const room = window.innerHeight - $('#target-form').getBoundingClientRect().bottom - 24;   // keep the list inside the window
+    suggestList.style.maxHeight = `${Math.round(Math.max(180, Math.min(420, room)))}px`;
+    setSuggestOpen(suggestItems.length > 0);
+  }
+  function pickSuggest(i) {
+    const item = suggestItems[i];
+    if (!item) return;
+    setSuggestOpen(false);
+    if (item.kind === 'query') { $('#target-form').requestSubmit(); return; }
+    searchInput.blur();
+    if (item.kind === 'preset') { searchInput.value = item.name; openTarget(item.id, item.fov); }
+    else { searchInput.value = item.label; openTarget(item.q); }
+  }
+  searchInput.addEventListener('focus', renderSuggest);
+  searchInput.addEventListener('input', renderSuggest);
+  searchInput.addEventListener('click', () => { if (suggestList.classList.contains('hidden')) renderSuggest(); });
+  searchInput.addEventListener('blur', () => setSuggestOpen(false));
+  searchInput.addEventListener('keydown', (ev) => {
+    if (ev.isComposing) return;
+    const open = !suggestList.classList.contains('hidden');
+    if (ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+      ev.preventDefault();
+      if (!open) { renderSuggest(); return; }
+      const n = suggestItems.length, d = ev.key === 'ArrowDown' ? 1 : -1;
+      if (n) markSuggest(suggestActive < 0 ? (d > 0 ? 0 : n - 1) : (suggestActive + d + n) % n);
+    } else if (ev.key === 'Enter' && open && suggestActive >= 0) {
+      ev.preventDefault(); pickSuggest(suggestActive);
+    } else if (ev.key === 'Escape' && open) {
+      ev.preventDefault(); setSuggestOpen(false);
+    }
+  });
+  suggestList.addEventListener('mousedown', (ev) => ev.preventDefault());      // keep the focus in the box
+  suggestList.addEventListener('mousemove', (ev) => {
+    const li = ev.target.closest('[data-i]');
+    if (li && Number(li.dataset.i) !== suggestActive) markSuggest(Number(li.dataset.i));
+  });
+  suggestList.addEventListener('click', (ev) => { const li = ev.target.closest('[data-i]'); if (li) pickSuggest(Number(li.dataset.i)); });
   function renderTarget() {
-    const t = state.target, box = $('#target-info');
-    if (!t) { box.innerHTML = ''; return; }
+    const t = state.target, box = $('#target-info'), about = $('#target-about');
+    $('#target-block').classList.toggle('hidden', !t);
+    if (!t) { box.innerHTML = ''; about.innerHTML = ''; return; }
     const byPosition = t.source === 'coordinates';
     const name = byPosition ? shortCoord(t.ra, t.dec) : pretty(t.name);
     const type = t.source === 'preset' ? t.type : (OTYPES[t.type] || '');
@@ -991,17 +1092,15 @@
       facts.push([eps.length > 1 ? `${eps.length} epochs` : 'Epoch', eps.length > 1 ? `${fmtMonth(first.date_start)} to ${fmtMonth(last.date_end)}` : fmtMonth(first.date_start)]);
       facts.push(['Exposures', r.subsampled ? `${r.n_used} of ${r.n_found}` : String(r.n_used)]);
     }
-    const old = box.querySelector('details');
-    if (old) state.detailsOpen = old.open;
     const was = t.passing;
     const moved = was ? (was.moved_arcsec >= 90 ? `${(was.moved_arcsec / 60).toFixed(1)}′` : `${Math.round(was.moved_arcsec)}″`) : '';
     box.innerHTML = `<h1 class="target-name">${esc(name)}</h1>`
-      + (type ? `<p class="target-type">${esc(sentence(type))}</p>` : '')
       + (was ? `<p class="target-note"><span>${esc(pretty(was.name))} was here in ${was.year}. It is now ${moved} to the ${esc(was.direction)}.</span>`
-        + `<button type="button" data-follow="${esc(was.id)}" data-fov="${was.fov}">Follow it</button></p>` : '')
-      + `<details class="fold facts-fold"${state.detailsOpen ? ' open' : ''}><summary>Details</summary>`
+        + `<button type="button" data-follow="${esc(was.id)}" data-fov="${was.fov}">Follow it</button></p>` : '');
+    // The description, the facts and the comparison stay folded under "Details".
+    about.innerHTML = (type ? `<p class="target-type">${esc(sentence(type))}</p>` : '')
       + `<dl class="facts">${facts.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>`
-      + (t.hint ? `<p class="target-hint">${esc(t.hint)}</p>` : '') + '</details>';
+      + (t.hint ? `<p class="target-hint">${esc(t.hint)}</p>` : '');
     const follow = box.querySelector('[data-follow]');
     if (follow) follow.addEventListener('click', () => openTarget(follow.dataset.follow, parseFloat(follow.dataset.fov)));
   }
@@ -1041,7 +1140,7 @@
       const t = await api(`/api/resolve?q=${encodeURIComponent(query)}`);
       state.target = t;
       $('#target-input').value = t.source === 'preset' ? t.name : query;
-      $$('#presets button').forEach((b) => b.classList.toggle('active', b.dataset.id === t.id));
+      rememberTarget(t, query);
       document.title = `${t.source === 'coordinates' ? shortCoord(t.ra, t.dec) : pretty(t.name)} · BeyondtheBlue`;
       return t;
     } catch (e) {
@@ -1760,7 +1859,8 @@
   $('#target-form').addEventListener('submit', (ev) => {
     ev.preventDefault();
     const q = $('#target-input').value.trim();
-    if (q) openTarget(q);
+    setSuggestOpen(false);
+    if (q) { $('#target-input').blur(); openTarget(q); }
   });
   $$('button[data-id][data-fov]').forEach((b) => b.addEventListener('click', () => openTarget(b.dataset.id, parseFloat(b.dataset.fov))));
   $('#btn-load').addEventListener('click', () => { if (state.target) loadFrames(); else $('#target-form').requestSubmit(); });

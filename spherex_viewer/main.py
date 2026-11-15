@@ -14,7 +14,7 @@ from astropy.io import fits
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -267,9 +267,21 @@ def api_job_fits(job_id: str):
 # --------------------------------------------------------------------------
 # Frontend
 # --------------------------------------------------------------------------
+def _asset_version(name: str) -> str:
+    try:
+        return str(int((FRONTEND_DIR / name).stat().st_mtime))
+    except OSError:
+        return "0"
+
+
 @app.get("/")
-def index() -> FileResponse:
-    return FileResponse(FRONTEND_DIR / "index.html", headers={"Cache-Control": "no-cache"})
+def index() -> HTMLResponse:
+    # The page links its stylesheet and script with the files' modification time, so a
+    # browser never pairs a fresh page with a cached copy of an older app.js or styles.css.
+    html = (FRONTEND_DIR / "index.html").read_text(encoding="utf-8")
+    for name in ("styles.css", "app.js"):
+        html = html.replace(f'"/static/{name}"', f'"/static/{name}?v={_asset_version(name)}"')
+    return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
 
 
 if FRONTEND_DIR.exists():

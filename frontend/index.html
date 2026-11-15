@@ -23,13 +23,6 @@
     <span class="logo-word"><b>Beyond</b>the<b>Blue</b></span>
   </a>
   <div class="header-search" id="header-search-slot"></div>
-  <nav class="targets" id="presets" aria-label="Test targets">
-    <button type="button" data-id="barnard" data-fov="8">Barnard's Star</button>
-    <button type="button" data-id="epsindi-b" data-fov="15">Epsilon Indi B</button>
-    <button type="button" data-id="wise0855" data-fov="8">WISE 0855−0714</button>
-    <button type="button" data-id="rwaur" data-fov="8">RW Aurigae</button>
-    <button type="button" data-id="rdra" data-fov="8">R Draconis</button>
-  </nav>
   <button id="btn-help" class="text-button" type="button">About</button>
 </header>
 
@@ -48,50 +41,23 @@
       <h1 class="display">Find what moved in the infrared sky</h1>
       <p class="lead">Search a star or a position. Every SPHEREx visit to that patch of sky plays back as a short film.</p>
       <div id="start-search-slot">
-        <form id="target-form" class="search" role="search">
-          <label class="visually-hidden" for="target-input">Star name or coordinates</label>
-          <input id="target-input" type="text" autocomplete="off" spellcheck="false" enterkeyhint="search"
-                 placeholder="Star name or coordinates"
-                 title="A name, or coordinates such as 08h55m10.8s -7d14m42.5s or 133.76 -7.24">
-          <label class="search-fov" title="Field of view">
-            <span>Field</span>
-            <select id="fov">
-              <option value="3">3′</option>
-              <option value="5">5′</option>
-              <option value="6">6′</option>
-              <option value="8" selected>8′</option>
-              <option value="10">10′</option>
-              <option value="12">12′</option>
-              <option value="15">15′</option>
-              <option value="20">20′</option>
-              <option value="30">30′</option>
-            </select>
-          </label>
-          <button type="submit" class="search-go">
-            <svg class="i" viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.6" cy="8.6" r="5.4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12.8 12.8L17 17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-            <span>Search</span>
-          </button>
-        </form>
+        <div class="search-box" id="search-box">
+          <form id="target-form" class="search" role="search">
+            <label class="visually-hidden" for="target-input">Star name or coordinates</label>
+            <input id="target-input" type="text" autocomplete="off" spellcheck="false" enterkeyhint="search"
+                   role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="target-suggest"
+                   placeholder="Star name or coordinates"
+                   title="A name, or coordinates such as 08h55m10.8s -7d14m42.5s or 133.76 -7.24">
+            <button type="submit" class="search-go" title="Search">
+              <svg class="i" viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.6" cy="8.6" r="5.4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12.8 12.8L17 17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+              <span>Search</span>
+            </button>
+          </form>
+          <ul id="target-suggest" class="suggest hidden" role="listbox" aria-label="Suggestions"></ul>
+        </div>
       </div>
     </div>
-    <figure class="start-figure">
-      <div class="blink">
-        <img src="/static/img/barnard-2025.webp" width="720" height="720" decoding="async" alt="SPHEREx image of the sky around Barnard's Star in August 2025">
-        <img src="/static/img/barnard-2026.webp" width="720" height="720" decoding="async" alt="The same patch of sky in August 2026: the star has moved north">
-      </div>
-      <figcaption>
-        <span>Barnard's Star, 5′ across</span>
-        <span class="blink-date"><span>August 2025</span><span>August 2026</span></span>
-      </figcaption>
-    </figure>
   </div>
-  <ul class="start-targets" aria-label="Test targets">
-    <li><button type="button" data-id="barnard" data-fov="8"><small>Fastest-moving star</small><strong>Barnard's Star</strong></button></li>
-    <li><button type="button" data-id="epsindi-b" data-fov="15"><small>Brown-dwarf pair</small><strong>Epsilon Indi B</strong></button></li>
-    <li><button type="button" data-id="wise0855" data-fov="8"><small>Coldest brown dwarf</small><strong>WISE 0855−0714</strong></button></li>
-    <li><button type="button" data-id="rwaur" data-fov="8"><small>Young variable star</small><strong>RW Aurigae</strong></button></li>
-    <li><button type="button" data-id="rdra" data-fov="8"><small>Pulsating red giant</small><strong>R Draconis</strong></button></li>
-  </ul>
 </section>
 
 <!-- workspace -->
@@ -119,6 +85,21 @@
           <label title="Band 5, 3.81–4.43 µm"><input type="radio" name="band" value="D5"><span>5</span></label>
           <label title="Band 6, 4.41–5.01 µm"><input type="radio" name="band" value="D6"><span>6</span></label>
         </div>
+      </fieldset>
+
+      <fieldset class="opts opts-field">
+        <legend>Field</legend>
+        <select id="fov" aria-label="Field of view" title="Width of the patch of sky shown. A wider field takes longer to load">
+          <option value="3">3′</option>
+          <option value="5">5′</option>
+          <option value="6">6′</option>
+          <option value="8" selected>8′</option>
+          <option value="10">10′</option>
+          <option value="12">12′</option>
+          <option value="15">15′</option>
+          <option value="20">20′</option>
+          <option value="30">30′</option>
+        </select>
       </fieldset>
 
       <fieldset class="opts opts-layers">
@@ -264,15 +245,20 @@
   </section>
 
   <section class="report" aria-label="Measurements">
-    <header id="target-info" class="target"></header>
-
-    <section class="changes" id="changes">
-      <div class="section-head">
-        <h2>What changed</h2>
-        <span id="changes-summary" class="muted"></span>
-      </div>
-      <div id="changes-list" class="changes-list"></div>
-    </section>
+    <div class="target-block hidden" id="target-block">
+      <header id="target-info" class="target"></header>
+      <details class="fold facts-fold" id="target-details">
+        <summary>Details</summary>
+        <div id="target-about"></div>
+        <section class="changes" id="changes">
+          <div class="section-head">
+            <h2>What changed</h2>
+            <span id="changes-summary" class="muted"></span>
+          </div>
+          <div id="changes-list" class="changes-list"></div>
+        </section>
+      </details>
+    </div>
 
     <div class="tabs" role="tablist">
       <button class="tab active" data-tab="spectrum" role="tab" type="button" aria-selected="true">Spectrum</button>
