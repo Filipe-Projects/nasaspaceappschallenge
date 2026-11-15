@@ -405,7 +405,7 @@ def test_parse_coordinates_formats():
     assert resolve.parse_coordinates("Barnard's Star") is None
 
 
-def test_parse_coordinates_accepts_the_challenge_wording():
+def test_parse_coordinates_accepts_labelled_input():
     ra, dec = resolve.parse_coordinates("Right Ascension 08h55m10.831s, declination -7d14m42.53s")
     assert math.isclose(ra, 133.795129, abs_tol=1e-5) and math.isclose(dec, -7.245147, abs_tol=1e-5)
     assert resolve.parse_coordinates("RA: 133.795, Dec: -7.245") == (133.795, -7.245)
@@ -415,7 +415,7 @@ def test_parse_coordinates_accepts_the_challenge_wording():
 
 
 def test_coordinates_on_the_past_track_of_a_test_target_say_so():
-    # the challenge quotes where WISE saw the brown dwarf in 2010
+    # the often-quoted position of WISE 0855 is where WISE saw the brown dwarf in 2010
     target = resolve.resolve("08h55m10.831s -7d14m42.53s", epoch_to=2026.75)
     passing = target["passing"]
     assert passing["id"] == "wise0855" and passing["year"] == 2010 and passing["direction"] == "west"
@@ -423,6 +423,12 @@ def test_coordinates_on_the_past_track_of_a_test_target_say_so():
     assert resolve.resolve("76.9565 30.4014", epoch_to=2026.75)["passing"] is None     # RW Aur stays put
     assert resolve.resolve("10.0 10.0", epoch_to=2026.75)["passing"] is None
     assert "passing" not in resolve.resolve("barnard", epoch_to=2026.75)
+
+
+def test_preset_names_as_the_page_writes_them():
+    # the search box shows "Barnard’s Star"; pressing Enter on it must find the test target, not ask Sesame
+    assert resolve.find_preset("Barnard’s Star")["id"] == "barnard"
+    assert resolve.find_preset("Barnard's Star")["id"] == "barnard"
 
 
 def test_propagate_barnard_moves_north():

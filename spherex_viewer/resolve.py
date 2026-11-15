@@ -14,7 +14,7 @@ from astropy.coordinates import SkyCoord
 from . import config
 from .http import fetch
 
-# The five targets named in the challenge brief.  Coordinates are ICRS at
+# The five test targets.  Coordinates are ICRS at
 # epoch J2000.0 (Simbad convention) with Gaia/literature proper motions, so
 # the viewer can propagate them to the SPHEREx observing epochs.
 PRESETS: list[dict] = [
@@ -47,7 +47,7 @@ PRESETS: list[dict] = [
         "pmra": -8123.7, "pmdec": 673.2, "parallax": 439.0,
         "epoch": 2000.0, "fov": 8.0,
         "type": "Coldest known brown dwarf (Y dwarf), 8.1 arcsec/yr proper motion, very faint",
-        "hint": "Only expected in the reddest bands (D5/D6, 3.8-5 um) after stacking; the challenge's "
+        "hint": "Only expected in the reddest bands (D5/D6, 3.8-5 um) after stacking; the often-quoted "
                 "08h55m10.8s -7d14m42.5s is the 2010 WISE position, 2.2 arcmin east of where it is now.",
     },
     {
@@ -103,7 +103,8 @@ def propagate(ra: float, dec: float, pmra: float | None, pmdec: float | None,
 
 
 def find_preset(text: str) -> dict | None:
-    key = re.sub(r"\s+", " ", text.strip().lower())
+    # the page writes names with a typographic apostrophe (Barnard’s Star) and may send them back
+    key = re.sub(r"\s+", " ", text.strip().lower()).replace("’", "'")
     for preset in PRESETS:
         if key == preset["id"] or key == preset["name"].lower() or key in preset["aliases"]:
             return preset
@@ -146,8 +147,8 @@ _COMPASS = ["north", "north-east", "east", "south-east", "south", "south-west", 
 def passing_preset(ra: float, dec: float, epoch_now: float) -> dict | None:
     """A fast test target that used to be at (ra, dec) and has since moved on.
 
-    Coordinates copied from a catalogue are tied to its epoch: the position the
-    challenge quotes for WISE 0855 is where WISE saw it in 2010.  When typed
+    Coordinates copied from a catalogue are tied to its epoch: the position often
+    quoted for WISE 0855 is where WISE saw it in 2010.  When typed
     coordinates fall on the past track of one of the test targets, the viewer
     can say so and offer to follow the object to where it is now.
     """

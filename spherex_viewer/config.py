@@ -41,7 +41,7 @@ SIA_TIMEOUT = float(os.environ.get("SPHEREX_SIA_TIMEOUT", "75"))
 # (measured: 100 -> 206 multipart, 101 -> 200 with the whole 70 MB file).
 MAX_RANGES_PER_REQUEST = int(os.environ.get("SPHEREX_MAX_RANGES", "100"))
 MAX_WORKERS = int(os.environ.get("SPHEREX_MAX_WORKERS", "16"))
-USER_AGENT = "spherex-sky-motion-viewer/0.2 (NASA Space Apps 2026)"
+USER_AGENT = "beyondtheblue/0.2"
 
 # Cache ------------------------------------------------------------------------
 CACHE_DIR = Path(os.environ.get("SPHEREX_CACHE_DIR", "./cache")).resolve()
@@ -96,5 +96,5 @@ DEFAULT_MASK_NAMES: list[str] = _env_list(
     "SNOWBALL,HALO,STREAK,SATELLITE_HALO",
 )
 
-# Startup warm-up: pre-compute the challenge test targets in the background.
+# Startup warm-up: pre-compute the five test targets in the background.
 WARMUP = os.environ.get("SPHEREX_WARMUP", "0") == "1"

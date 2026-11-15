@@ -1,4 +1,4 @@
-"""Pre-compute the challenge test targets so the demo never waits on IRSA.
+"""Pre-compute the five test targets so they never wait on IRSA.
 
 Usage (from the repository root, with the virtualenv active):
 

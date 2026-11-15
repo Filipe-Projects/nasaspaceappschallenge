@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>BeyondtheBlue</title>
-<meta name="description" content="Play back every SPHEREx visit to any patch of sky and see what moved or changed. NASA Space Apps 2026: Planet X and SPHEREx.">
+<meta name="description" content="Play back every SPHEREx visit to any patch of sky and see what moved or changed.">
 <meta name="theme-color" content="#1a40bf">
 <meta name="color-scheme" content="only light">
 <!-- Put your public repository URL here; the "Source code" link in the About box uses it. -->
@@ -353,6 +353,7 @@
       <p class="fine">Quick-look measurements: fixed apertures, no PSF fitting. Data: SPHEREx, NASA/JPL-Caltech, via IRSA. Catalogues: Gaia DR3 (ESA), CatWISE2020. Survey images: Legacy Surveys, Aladin Lite (CDS).</p>
     </details>
     <p class="links">
+      <button type="button" id="btn-tour">Take the tour</button>
       <a href="https://irsa.ipac.caltech.edu/Missions/spherex.html" target="_blank" rel="noopener">SPHEREx at IRSA</a>
       <a href="https://www.spaceappschallenge.org/2026/challenges/planet-x-and-spherex/" target="_blank" rel="noopener">The challenge</a>
       <a id="link-github" href="#" target="_blank" rel="noopener">Source code</a>
@@ -367,11 +368,12 @@
     if (q.get('embed') === '1') b.classList.add('embed');
     if (q.get('target') || (q.get('ra') && q.get('dec'))) {
       b.classList.replace('is-start', 'is-working');
-      document.getElementById('header-search-slot').appendChild(document.getElementById('target-form'));
+      document.getElementById('header-search-slot').appendChild(document.getElementById('search-box'));
     }
   })();
 </script>
 <script src="/static/vendor/plotly-basic-2.35.2.min.js" charset="utf-8" async data-plotly></script>
 <script src="/static/app.js" defer></script>
+<script src="/static/tour.js" defer></script>
 </body>
 </html>

@@ -2,12 +2,12 @@
 
 Writes spherex_viewer/snapshots/*.json.gz: the finished frame set of each of
 the five targets at its default field of view, the spectrum at the target's
-position, and the same for the field at the coordinates the challenge quotes
-for WISE 0855 (see spherex_viewer/snapshots.py).  Run it with IRSA reachable or
-the cache warm (scripts/precache.py), and commit the files it writes.
+position, and the same for the field at the 2010 position of WISE 0855, which
+is still widely quoted (see spherex_viewer/snapshots.py).  Run it with IRSA
+reachable or the cache warm (scripts/precache.py), and commit the files it writes.
 
     python scripts/snapshot.py              # everything
-    python scripts/snapshot.py barnard rdra challenge-wise0855
+    python scripts/snapshot.py barnard rdra wise0855-2010
 """
 from __future__ import annotations
 
@@ -19,8 +19,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from spherex_viewer import pipeline, snapshots  # noqa: E402
 from spherex_viewer.resolve import PRESETS, resolve  # noqa: E402
 
-# Fields worth keeping besides the presets: the coordinates printed in the challenge text.
-EXTRA_FIELDS = [{"id": "challenge-wise0855", "name": "Challenge coordinates of WISE 0855",
+# Fields worth keeping besides the presets: where WISE 0855 was in 2010.
+EXTRA_FIELDS = [{"id": "wise0855-2010", "name": "WISE 0855 at its 2010 position",
                  "query": "08h55m10.831s -7d14m42.53s", "fov": 8.0}]
 
 

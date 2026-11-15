@@ -164,8 +164,10 @@
   }
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const sentence = (s) => { const t = String(s || '').trim(); return t.charAt(0).toUpperCase() + t.slice(1); };
+  /** Text from the server with typographic apostrophes, as written everywhere else on the page. */
+  const curly = (s) => String(s || '').replace(/'/g, '’');
   /** Names as shown in headings: Simbad's "NAME " prefix dropped, a true minus sign in designations. */
-  const pretty = (name) => String(name || '').replace(/^NAME\s+/, '').replace(/(\d)-(\d)/g, '$1−$2');
+  const pretty = (name) => curly(String(name || '').replace(/^NAME\s+/, '')).replace(/(\d)-(\d)/g, '$1−$2');
   /** A server progress message as a short status line. */
   const statusText = (m) => (/^(queued|starting|done|loaded)/i.test(m || '') ? 'Working' : sentence(String(m || '').split(' · ')[0]).replace(/(\d+)\/(\d+)/, '$1 of $2'));
   const hexToRgba = (hex, a) => { const v = parseInt(hex.slice(1), 16); return `rgba(${v >> 16}, ${(v >> 8) & 255}, ${v & 255}, ${a})`; };
@@ -977,7 +979,7 @@
   }
 
   // ───────────────────────── search suggestions ─────────────────────────
-  // The challenge's test targets and the visitor's recent searches, listed under the
+  // The five test targets and the visitor's recent searches, listed under the
   // search box when it is focused and filtered as they type.
   const SUGGESTED = [
     { id: 'barnard', name: 'Barnard’s Star', note: 'Fastest-moving star', fov: 8, keys: 'gj 699 v2500 oph' },
@@ -1102,9 +1104,9 @@
       + (was ? `<p class="target-note"><span>${esc(pretty(was.name))} was here in ${was.year}. It is now ${moved} to the ${esc(was.direction)}.</span>`
         + `<button type="button" data-follow="${esc(was.id)}" data-fov="${was.fov}">Follow it</button></p>` : '');
     // The description, the facts and the comparison stay folded under "Details".
-    about.innerHTML = (type ? `<p class="target-type">${esc(sentence(type))}</p>` : '')
+    about.innerHTML = (type ? `<p class="target-type">${esc(curly(sentence(type)))}</p>` : '')
       + `<dl class="facts">${facts.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>`
-      + (t.hint ? `<p class="target-hint">${esc(t.hint)}</p>` : '');
+      + (t.hint ? `<p class="target-hint">${esc(curly(t.hint))}</p>` : '');
     const follow = box.querySelector('[data-follow]');
     if (follow) follow.addEventListener('click', () => openTarget(follow.dataset.follow, parseFloat(follow.dataset.fov)));
   }
@@ -1182,7 +1184,7 @@
     try {
       const t = await patient(() => api(`/api/resolve?q=${encodeURIComponent(query)}`), 3);
       state.target = t;
-      $('#target-input').value = t.source === 'preset' ? t.name : query;
+      $('#target-input').value = t.source === 'preset' ? pretty(t.name) : query;
       rememberTarget(t, query);
       document.title = `${t.source === 'coordinates' ? shortCoord(t.ra, t.dec) : pretty(t.name)} · BeyondtheBlue`;
       return t;

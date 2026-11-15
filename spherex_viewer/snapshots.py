@@ -1,8 +1,8 @@
-"""Saved answers for the challenge's test targets, served when IRSA cannot be reached.
+"""Saved answers for the test targets, served when IRSA cannot be reached.
 
 The viewer reads everything live from IRSA.  When the archive is down, a field
-that is not in the disk cache cannot be shown at all, and the five targets the
-challenge names would be the first thing a visitor tries.  ``scripts/snapshot.py``
+that is not in the disk cache cannot be shown at all, and the five test targets
+listed under the search box are the first thing a visitor tries.  ``scripts/snapshot.py``
 therefore stores the finished frame set and the target spectrum of each of
 them in this package (gzip JSON, a few megabytes in total).  A snapshot is shown
 while the same field is being read from IRSA for the first time, and whenever

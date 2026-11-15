@@ -45,7 +45,7 @@ WARMUP_DELAY_SECONDS = 15.0
 
 
 def _warmup() -> None:
-    """Read the challenge targets from IRSA in the background so visitors get the live result.
+    """Read the test targets from IRSA in the background so visitors get the live result.
 
     Until a target is read, its saved copy is shown at once.  The warm-up
     waits a moment after start-up (the visit that woke the server comes
@@ -87,7 +87,7 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(
     title="BeyondtheBlue",
     version=__version__,
-    description="Play back every SPHEREx visit to any patch of sky. NASA Space Apps 2026: Planet X and SPHEREx.",
+    description="Play back every SPHEREx visit to any patch of sky and see what moved or changed.",
     lifespan=lifespan,
 )
 # Level 6 gives the same size as the default 9 on this data in half the CPU time.
@@ -303,7 +303,7 @@ def index() -> HTMLResponse:
     # The page links its stylesheet and script with the files' modification time, so a
     # browser never pairs a fresh page with a cached copy of an older app.js or styles.css.
     html = (FRONTEND_DIR / "index.html").read_text(encoding="utf-8")
-    for name in ("styles.css", "app.js"):
+    for name in ("styles.css", "app.js", "tour.js"):
         html = html.replace(f'"/static/{name}"', f'"/static/{name}?v={_asset_version(name)}"')
     return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
 
