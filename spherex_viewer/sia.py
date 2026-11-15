@@ -236,6 +236,24 @@ def search_is_cached(ra: float, dec: float, radius_deg: float) -> bool:
     return path.exists()
 
 
+def cached_exposures(ra: float, dec: float, radius_deg: float) -> list[Exposure] | None:
+    """The answer :func:`find_exposures` would give from the cache, or None; never waits on IRSA.
+
+    An old answer is renewed in the background, as in :func:`find_exposures`.
+    """
+    from .releases import active_collections
+    collections = list(active_collections())
+    cache = default_cache()
+    key = _cache_key(collections, ra, dec, radius_deg)
+    data = cache.get_json("sia", key, ttl=config.SIA_CACHE_TTL)
+    if data is None:
+        data = cache.get_json("sia", key)
+        if data is None:
+            return None
+        _refresh_later(key, collections, ra, dec, radius_deg)
+    return [Exposure.from_dict(d) for d in data]
+
+
 def find_exposures(ra: float, dec: float, radius_deg: float,
                    collections: list[str] | None = None,
                    use_cache: bool = True, failures: dict | None = None,

@@ -46,7 +46,7 @@ def main() -> int:
             print(f"== {preset['name']} · {fov}' field  ({target['ra_now']:.5f}, {target['dec_now']:.5f})")
             params = pipeline.normalise_frame_params({"ra": target["ra_now"], "dec": target["dec_now"], "fov": fov})
             try:
-                result = pipeline.build_frames(params, progress)
+                result = pipeline.build_frames(params, progress, fallback=False)     # read it, never the saved copy
             except Exception as exc:  # noqa: BLE001
                 print(f"   FAILED: {exc}")
                 continue
@@ -66,7 +66,7 @@ def main() -> int:
                 "pmdec": target.get("pmdec"), "epoch": target.get("epoch", 2000.0),
                 "field": {"ra": target["ra_now"], "dec": target["dec_now"], "fov": fovs[0]}})
             try:
-                result = pipeline.build_spectrum(params, progress)
+                result = pipeline.build_spectrum(params, progress, fallback=False)
                 print(f"   spectrum: {len(result['points'])} measurements")
             except Exception as exc:  # noqa: BLE001
                 print(f"   spectrum FAILED: {exc}")

@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import base64
+import gzip
 import io
 import logging
+import mimetypes
 import threading
 import time
 from contextlib import asynccontextmanager
@@ -11,7 +13,7 @@ from pathlib import Path
 
 import numpy as np
 from astropy.io import fits
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, Response
@@ -30,18 +32,32 @@ log = logging.getLogger("spherex_viewer")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
+# Some systems' type tables lack these; with the right type the (already
+# compressed) fonts and images are not gzipped again on every request.
+mimetypes.add_type("font/woff2", ".woff2")
+mimetypes.add_type("image/webp", ".webp")
 
 
 # --------------------------------------------------------------------------
 # Background chores
 # --------------------------------------------------------------------------
+WARMUP_DELAY_SECONDS = 15.0
+
+
 def _warmup() -> None:
-    """Pre-compute the challenge targets so the first visitor does not wait."""
+    """Read the challenge targets from IRSA in the background so visitors get the live result.
+
+    Until a target is read, its saved copy is shown at once.  The warm-up
+    waits a moment after start-up (the visit that woke the server comes
+    first), and a target a visitor has already set reading is not read twice.
+    """
+    time.sleep(WARMUP_DELAY_SECONDS)
     for preset in PRESETS:
         try:
             target = resolve(preset["id"])
-            params = {"ra": target["ra_now"], "dec": target["dec_now"], "fov": preset["fov"]}
-            pipeline.build_frames(params, lambda *_: None, fallback=False)
+            params = pipeline.normalise_frame_params({"ra": target["ra_now"], "dec": target["dec_now"],
+                                                      "fov": preset["fov"]})
+            pipeline.warm(params)
             log.info("warm-up done: %s", preset["name"])
         except Exception as exc:  # noqa: BLE001
             log.warning("warm-up failed for %s: %s", preset["name"], exc)
@@ -74,7 +90,8 @@ app = FastAPI(
     description="Play back every SPHEREx visit to any patch of sky. NASA Space Apps 2026: Planet X and SPHEREx.",
     lifespan=lifespan,
 )
-app.add_middleware(GZipMiddleware, minimum_size=2048)
+# Level 6 gives the same size as the default 9 on this data in half the CPU time.
+app.add_middleware(GZipMiddleware, minimum_size=2048, compresslevel=6)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET", "POST"], allow_headers=["*"])
 
 # Jobs wait on the network, not on the CPU; a visitor who changes target leaves the old one running.
@@ -114,8 +131,11 @@ class SpectrumRequest(BaseModel):
 # --------------------------------------------------------------------------
 # Meta endpoints
 # --------------------------------------------------------------------------
-@app.get("/api/health")
-def health() -> dict:
+@app.api_route("/api/health", methods=["GET", "HEAD"])
+async def health() -> dict:
+    # Answered on the event loop, never queued behind slow archive requests in the
+    # thread pool: a health check that times out makes the host restart the server.
+    # HEAD too: uptime monitors (UptimeRobot) check with HEAD and count a 405 as down.
     return {"status": "ok", "version": __version__, "collections": active_collections()}
 
 
@@ -208,7 +228,7 @@ def api_job(job_id: str) -> dict:
 
 
 @app.get("/api/jobs/{job_id}/result")
-def api_job_result(job_id: str):
+def api_job_result(job_id: str, request: Request):
     job = jobs.get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="unknown job")
@@ -216,7 +236,11 @@ def api_job_result(job_id: str):
         raise HTTPException(status_code=500, detail=job.error)
     if job.state != "done":
         return JSONResponse(status_code=202, content=job.status())
-    return JSONResponse(content=job.result)
+    # The body was serialised and compressed once when the job finished.
+    if "gzip" in request.headers.get("accept-encoding", "").lower():
+        return Response(content=job.body, media_type="application/json",
+                        headers={"Content-Encoding": "gzip", "Vary": "Accept-Encoding"})
+    return Response(content=gzip.decompress(job.body), media_type="application/json")
 
 
 @app.get("/api/jobs/{job_id}/fits")
@@ -274,7 +298,7 @@ def _asset_version(name: str) -> str:
         return "0"
 
 
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 def index() -> HTMLResponse:
     # The page links its stylesheet and script with the files' modification time, so a
     # browser never pairs a fresh page with a cached copy of an older app.js or styles.css.
@@ -284,5 +308,24 @@ def index() -> HTMLResponse:
     return HTMLResponse(html, headers={"Cache-Control": "no-cache"})
 
 
+class CachedStaticFiles(StaticFiles):
+    """Static files a browser may keep, so a second visit loads nothing but the page.
+
+    Files whose address changes with their content (``?v=`` links, the
+    versioned Plotly bundle) and the fonts, which never change, are kept for
+    a year; anything else is kept for an hour and then checked again.
+    """
+
+    LONG = "public, max-age=31536000, immutable"
+    SHORT = "public, max-age=3600"
+
+    def file_response(self, full_path, stat_result, scope, status_code: int = 200) -> Response:
+        response = super().file_response(full_path, stat_result, scope, status_code)
+        path = str(scope.get("path", ""))
+        versioned = b"v=" in scope.get("query_string", b"") or "/vendor/" in path or "/fonts/" in path
+        response.headers["Cache-Control"] = self.LONG if versioned else self.SHORT
+        return response
+
+
 if FRONTEND_DIR.exists():
-    app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
+    app.mount("/static", CachedStaticFiles(directory=str(FRONTEND_DIR)), name="static")

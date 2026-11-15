@@ -923,16 +923,20 @@
   async function api(path, opts) {
     const r = await fetch(path, opts);
     if (!r.ok) {
-      let detail = r.statusText;
-      try { const j = await r.json(); detail = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail || j); } catch (e) { /* not JSON */ }
+      let detail = r.statusText, fromApp = false;
+      try { const j = await r.json(); fromApp = j && 'detail' in j; detail = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail || j); } catch (e) { /* not JSON */ }
       const error = new Error(detail || `HTTP ${r.status}`);
       error.status = r.status;
+      error.fromApp = fromApp;
       throw error;
     }
     return r.json();
   }
-  /** A request worth repeating: the network dropped, or a proxy in front of the server answered for it. */
-  const passing = (e) => !e.status || [408, 429, 502, 503, 504].includes(e.status);
+  /**
+   * A request worth repeating: the network dropped, or a proxy in front of the server answered for it.
+   * A 502 from the server itself (an archive or name service it already asked several times) is final.
+   */
+  const passing = (e) => !e.status || [408, 429].includes(e.status) || ([502, 503, 504].includes(e.status) && !e.fromApp);
   async function patient(call, tries = 5) {
     for (let attempt = 1; ; attempt++) {
       try { return await call(); } catch (e) {
@@ -1176,7 +1180,7 @@
     const form = $('#target-form');
     form.classList.add('is-busy');
     try {
-      const t = await api(`/api/resolve?q=${encodeURIComponent(query)}`);
+      const t = await patient(() => api(`/api/resolve?q=${encodeURIComponent(query)}`), 3);
       state.target = t;
       $('#target-input').value = t.source === 'preset' ? t.name : query;
       rememberTarget(t, query);
@@ -1327,7 +1331,7 @@
     const stamp = `${t.ra}|${t.dec}|${t.fov_arcmin}`;
     try {
       const radius = Math.min(0.6, t.fov_arcmin / 60 * 0.75);
-      const res = await api(`/api/catalog/${name}?ra=${t.ra}&dec=${t.dec}&radius=${radius.toFixed(4)}`);
+      const res = await patient(() => api(`/api/catalog/${name}?ra=${t.ra}&dec=${t.dec}&radius=${radius.toFixed(4)}`), 2);
       if (!state.result || `${state.result.target.ra}|${state.result.target.dec}|${state.result.target.fov_arcmin}` !== stamp) return;
       state.catalogs[name] = Array.isArray(res.sources) ? res.sources : [];
       renderChanges(); renderSources(); draw();
@@ -2010,7 +2014,7 @@
     onSelectionChange();
     draw();
     try {
-      state.config = await api('/api/config');
+      state.config = await patient(() => api('/api/config'), 4);
       if (state.config.default_flags && new URLSearchParams(location.search).get('flags') === null) { $('#chk-flags').checked = true; $('#more-overlays').open = true; }
     } catch (e) {
       showError('The server is not answering.');

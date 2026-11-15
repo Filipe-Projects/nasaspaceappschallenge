@@ -505,19 +505,203 @@ def test_snapshots_cover_the_five_test_targets_and_nothing_else():
         assert spectrum is not None and spectrum["points"], preset["id"]
 
 
-def test_frames_fall_back_to_the_snapshot_when_the_archive_fails(monkeypatch):
-    from spherex_viewer import pipeline
+def test_frames_fall_back_to_the_snapshot_when_the_archive_fails(tmp_path, monkeypatch):
+    from spherex_viewer import config, pipeline
 
     def unreachable(*args, **kwargs):
         raise RuntimeError("SIA spherex_dr1 failed after 1 attempt")
 
+    monkeypatch.setattr(config, "CACHE_DIR", tmp_path)              # nothing read from IRSA yet
+    monkeypatch.setattr(pipeline, "_warm_results", {})
     monkeypatch.setattr(pipeline, "search", unreachable)
-    monkeypatch.setattr(pipeline, "_warm_later", lambda p: None)
+    warmed = []
+    monkeypatch.setattr(pipeline, "_warm_later", lambda p: warmed.append(p))
     target = resolve.resolve("barnard", epoch_to=2026.75)
     request = {"ra": target["ra_now"], "dec": target["dec_now"], "fov": 8.0}
-    for cached in (True, False):            # the search is in the cache but the read fails; nothing is cached at all
-        monkeypatch.setattr(pipeline, "search_is_cached", lambda *args, cached=cached: cached)
-        result = pipeline.build_frames(request, lambda *_: None)
-        assert result["snapshot"] and result["n_used"] > 100
+    result = pipeline.build_frames(request, lambda *_: None)
+    assert result["snapshot"] and result["n_used"] > 100
+    assert len(warmed) == 1                                            # and IRSA is read in the background
     with pytest.raises(RuntimeError):
         pipeline.build_frames({"ra": 10.0, "dec": 10.0, "fov": 8.0}, lambda *_: None)
+
+
+def test_a_test_target_is_answered_live_once_its_frames_are_ready(tmp_path, monkeypatch):
+    from spherex_viewer import config, pipeline
+
+    monkeypatch.setattr(config, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(pipeline, "_warm_results", {})
+    monkeypatch.setattr(pipeline, "_warm_later", lambda p: pytest.fail("nothing to read"))
+    monkeypatch.setattr(pipeline, "_build_frames", lambda *a, **k: pytest.fail("must not wait on IRSA"))
+    target = resolve.resolve("barnard", epoch_to=2026.75)
+    params = pipeline.normalise_frame_params({"ra": target["ra_now"], "dec": target["dec_now"], "fov": 8.0})
+    live = {"n_used": 395, "frames": [], "snapshot": None}
+    pipeline._warm_results[pipeline._params_id(params)] = (__import__("time").time(), live)
+    assert pipeline.build_frames(dict(params), lambda *_: None) is live
+    # its target spectrum is then measured live too (here: the measurement is stubbed)
+    monkeypatch.setattr(pipeline, "_build_spectrum", lambda p, progress: {"points": [1] * 500, "live": True})
+    spectrum = pipeline.build_spectrum({"ra": target["ra"], "dec": target["dec"], "pmra": target["pmra"],
+                                        "pmdec": target["pmdec"], "epoch": 2000.0, "r_ap": 2.0,
+                                        "field": {"ra": params["ra"], "dec": params["dec"], "fov": 8.0}},
+                                       lambda *_: None)
+    assert spectrum.get("live")
+
+
+def test_a_test_target_spectrum_follows_its_saved_frames(tmp_path, monkeypatch):
+    from spherex_viewer import config, pipeline
+
+    monkeypatch.setattr(config, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(pipeline, "_warm_results", {})
+    monkeypatch.setattr(pipeline, "_build_spectrum", lambda *a, **k: pytest.fail("must not wait on IRSA"))
+    target = resolve.resolve("barnard", epoch_to=2026.75)
+    params = pipeline.normalise_frame_params({"ra": target["ra_now"], "dec": target["dec_now"], "fov": 8.0})
+    spectrum = pipeline.build_spectrum({"ra": target["ra"], "dec": target["dec"], "pmra": target["pmra"],
+                                        "pmdec": target["pmdec"], "epoch": 2000.0, "r_ap": 2.0,
+                                        "field": {"ra": params["ra"], "dec": params["dec"], "fov": 8.0}},
+                                       lambda *_: None)
+    assert spectrum["snapshot"] and spectrum["points"]
+
+
+def test_a_background_read_runs_once_per_field(tmp_path, monkeypatch):
+    import threading
+
+    from spherex_viewer import config, pipeline
+
+    monkeypatch.setattr(config, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(pipeline, "_warm_results", {})
+    monkeypatch.setattr(pipeline, "_warm_failed", {})
+    gate, calls = threading.Event(), []
+
+    def slow_build(p, progress, **kwargs):
+        calls.append(kwargs.get("workers"))
+        gate.wait(5)
+        return {"n_used": 400}
+
+    monkeypatch.setattr(pipeline, "_build_frames", slow_build)
+    target = resolve.resolve("barnard", epoch_to=2026.75)
+    params = pipeline.normalise_frame_params({"ra": target["ra_now"], "dec": target["dec_now"], "fov": 8.0})
+    first = threading.Thread(target=pipeline.warm, args=(params,))
+    first.start()
+    for _ in range(100):
+        if pipeline._is_warming(params):
+            break
+        __import__("time").sleep(0.01)
+    pipeline.warm(params)                       # already being read: returns at once
+    gate.set()
+    first.join(5)
+    assert calls == [pipeline.WARM_WORKERS]
+    assert pipeline._ready_frames(params) == {"n_used": 400}
+
+
+def test_fast_wcs_matches_astropy_header_wcs():
+    import warnings
+
+    from astropy.wcs import WCS
+
+    from spherex_viewer import cutouts
+
+    header = _sip_header(ra=271.3, dec=-33.2, roll_deg=37.0)
+    header["A_ORDER"] = header["B_ORDER"] = header["AP_ORDER"] = header["BP_ORDER"] = 3
+    for name, value in (("A_2_0", 2.1e-6), ("A_0_2", -1.3e-6), ("A_1_1", 4.2e-6), ("A_3_0", 5.6e-10),
+                        ("B_0_2", 1.9e-6), ("B_2_1", 6.1e-10), ("AP_2_0", -2.0e-6), ("BP_1_1", 7.3e-7)):
+        header[name] = value
+    # values as a FITS card holds them (at most 20 characters), like every real header
+    cards = [[k, float(f"{v:.14g}") if isinstance(v, float) else v] for k, v in reduce_header(header)]
+    fast = cutouts._build_fast_wcs(cards)
+    assert fast is not None
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        slow = WCS(cutouts.header_from_cards(cards))
+    xs, ys = np.meshgrid(np.linspace(-20, 2060, 9), np.linspace(-20, 2060, 9))
+    ra, dec = slow.all_pix2world(xs.ravel(), ys.ravel(), 0)
+    assert np.array_equal(np.array(fast.all_pix2world(xs.ravel(), ys.ravel(), 0)), np.array([ra, dec]))
+    for a, b in zip(world_to_pixel(fast, ra, dec), world_to_pixel(slow, ra, dec)):
+        assert np.array_equal(a, b)
+    for a, b in zip(world_to_pixel(shifted_wcs(fast, 700, 900), ra, dec),
+                    world_to_pixel(shifted_wcs(slow, 700, 900), ra, dec)):
+        assert np.array_equal(a, b)
+    # anything that is not a TAN-SIP image takes astropy's own path
+    assert cutouts._build_fast_wcs([["CTYPE1", "RA---TAN"], ["CTYPE2", "DEC--TAN"], ["CRPIX1", 1.0]]) is None
+    assert cutouts._build_fast_wcs(cards + [["PV2_1", 0.1]]) is None
+    assert make_wcs(cards).sip is not None
+
+
+def test_a_window_next_to_the_kept_one_is_read_together_with_it():
+    from spherex_viewer.archive import merged_box
+
+    field = (500, 589, 700, 789)                       # the field's window
+    edge_source = (580, 607, 740, 767)                 # a source clicked at its edge
+    assert merged_box(edge_source, field) == (500, 607, 700, 789)
+    far = (1500, 1589, 100, 189)                       # another field on the same detector
+    assert merged_box(far, field) == far               # kept apart: reading the box between would be wasteful
+
+
+def test_a_finished_job_keeps_its_result_compressed_and_old_jobs_go():
+    import gzip
+    import json
+    import time
+
+    from spherex_viewer import jobs as jobs_module
+
+    manager = jobs_module.JobManager(max_workers=2)
+    job = manager.submit("frames", {"a": 1}, lambda p, progress: {"x": [1.5, 2], "s": "µm"})
+    for _ in range(200):
+        if job.state == "done":
+            break
+        time.sleep(0.01)
+    assert job.state == "done" and json.loads(gzip.decompress(job.body)) == {"x": [1.5, 2], "s": "µm"}
+    assert job.result == {"x": [1.5, 2], "s": "µm"} and not job.snapshot
+    assert manager.submit("frames", {"a": 1}, lambda p, progress: pytest.fail("shared")) is job
+    saved = manager.submit("frames", {"b": 1}, lambda p, progress: {"snapshot": {"saved": "2026-11-15"}})
+    for _ in range(200):
+        if saved.state == "done":
+            break
+        time.sleep(0.01)
+    assert saved.snapshot                                  # a saved copy is not handed out again
+    assert manager.submit("frames", {"b": 1}, lambda p, progress: {}) is not saved
+    for job_ in list(manager._jobs.values()):
+        job_.finished = time.time() - jobs_module.JOB_TTL_SECONDS - 1
+    manager.submit("frames", {"c": 1}, lambda p, progress: {})
+    assert len(manager._jobs) == 1
+
+
+def test_uptime_monitors_can_check_with_head():
+    from fastapi.testclient import TestClient
+
+    from spherex_viewer import main
+
+    client = TestClient(main.app)
+    for path in ("/api/health", "/"):
+        assert client.head(path).status_code == 200, path
+        assert client.get(path).status_code == 200, path
+    assert client.get("/api/health").json()["status"] == "ok"
+
+
+def test_sesame_asks_the_mirrors_when_the_main_server_is_slow(tmp_path, monkeypatch):
+    import time
+
+    from spherex_viewer import config
+
+    monkeypatch.setattr(config, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(config, "SESAME_URLS", ["https://main", "https://mirror"])
+    monkeypatch.setattr(resolve, "SESAME_HEDGE_SECONDS", 0.05)
+    answer = ('<?xml version="1.0"?><Sesame><Target><Resolver name="S=Simbad"><oname>Proxima Centauri</oname>'
+              '<jradeg>217.42895</jradeg><jdedeg>-62.67948</jdedeg></Resolver></Target></Sesame>')
+    asked = []
+
+    class Reply:
+        status_code = 200
+        text = answer
+
+    def fake_fetch(method, url, **kwargs):
+        asked.append(url.split("?")[0])
+        if url.startswith("https://main"):
+            time.sleep(1.0)
+        return Reply()
+
+    monkeypatch.setattr(resolve, "fetch", fake_fetch)
+    started = time.time()
+    found = resolve.sesame("Proxima Centauri")
+    assert found["name"] == "Proxima Centauri" and time.time() - started < 0.8
+    assert asked == ["https://main", "https://mirror"]
+    monkeypatch.setattr(resolve, "fetch", lambda *a, **k: pytest.fail("remembered"))
+    assert resolve.sesame("proxima  centauri")["ra"] == pytest.approx(217.42895)

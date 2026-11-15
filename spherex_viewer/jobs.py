@@ -4,9 +4,15 @@ Building a frame sequence means hundreds of small archive requests, which can
 take longer than a hosting platform's HTTP timeout.  Requests therefore
 create a job, and the browser polls for progress until the result is ready.
 Identical requests share one job.
+
+A finished result is turned into gzip-compressed JSON once, in the job's own
+thread: the answer is then sent without any work on the request path (several
+times faster on a small shared CPU), and a kept job holds about half the memory
+of the Python objects.
 """
 from __future__ import annotations
 
+import gzip
 import hashlib
 import json
 import threading
@@ -21,6 +27,18 @@ ProgressCallback = Callable[[int, int, str], None]
 Runner = Callable[[dict, ProgressCallback], Any]
 
 JOB_TTL_SECONDS = 3600.0
+# Finished jobs kept at most, by number and by size; the oldest go first (the
+# browser starts a job it no longer finds again, and its result then comes
+# from the disk cache).
+MAX_FINISHED_JOBS = 48
+MAX_FINISHED_BYTES = 64_000_000
+GZIP_LEVEL = 6                     # same size as level 9 for this data, in half the time
+
+
+def encode_result(result: Any) -> bytes:
+    """The result as the JSON a JSONResponse would send, gzip-compressed."""
+    raw = json.dumps(result, ensure_ascii=False, allow_nan=False, indent=None, separators=(",", ":")).encode("utf-8")
+    return gzip.compress(raw, compresslevel=GZIP_LEVEL, mtime=0)
 
 
 @dataclass
@@ -36,8 +54,14 @@ class Job:
     created: float = field(default_factory=time.time)
     started: float | None = None
     finished: float | None = None
-    result: Any = None
+    body: bytes | None = None      # the result, see encode_result()
+    snapshot: bool = False         # answered from a saved copy
     error: str | None = None
+
+    @property
+    def result(self) -> Any:
+        """The result as Python objects (decoded on demand: only the FITS export needs it)."""
+        return None if self.body is None else json.loads(gzip.decompress(self.body))
 
     def status(self) -> dict:
         elapsed = (self.finished or time.time()) - (self.started or self.created)
@@ -65,6 +89,9 @@ class JobManager:
         self._jobs: dict[str, Job] = {}
         self._by_key: dict[str, str] = {}
         self._lock = threading.Lock()
+        # Encoded saved copies, by (request, date saved): a new job is started for every
+        # request answered from a saved copy, and the copy itself never changes.
+        self._saved_bodies: dict[tuple[str, str], bytes] = {}
 
     def submit(self, kind: str, params: dict, runner: Runner) -> Job:
         key = params_key(kind, params)
@@ -74,8 +101,7 @@ class JobManager:
             if existing_id and existing_id in self._jobs:
                 existing = self._jobs[existing_id]
                 # an answer served from a saved copy is not reused: the next request tries IRSA again
-                stand_in = isinstance(existing.result, dict) and existing.result.get("snapshot")
-                if existing.state != "error" and not stand_in:
+                if existing.state != "error" and not existing.snapshot:
                     return existing
             job = Job(id=uuid.uuid4().hex, kind=kind, params=params, key=key)
             self._jobs[job.id] = job
@@ -98,11 +124,25 @@ class JobManager:
                 job.message = message
 
         try:
-            job.result = runner(job.params, progress)
-            job.state = "done"
-            job.message = "done"
+            result = runner(job.params, progress)
+            saved = result.get("snapshot") if isinstance(result, dict) else None
+            job.snapshot = bool(saved)
+            saved_key = (job.key, json.dumps(saved, sort_keys=True)) if saved else None
+            with self._lock:
+                body = self._saved_bodies.get(saved_key) if saved_key else None
+            if body is None:
+                body = encode_result(result)
+                if saved_key:
+                    with self._lock:
+                        self._saved_bodies[saved_key] = body
+                        while len(self._saved_bodies) > 16:
+                            self._saved_bodies.pop(next(iter(self._saved_bodies)))
+            job.body = body
+            del result
             if job.total:
                 job.done = job.total
+            job.message = "done"
+            job.state = "done"             # last: a poll that sees "done" finds the body ready
         except Exception as exc:  # noqa: BLE001 - surfaced to the client
             job.state = "error"
             job.error = f"{type(exc).__name__}: {exc}"
@@ -113,8 +153,14 @@ class JobManager:
 
     def _cleanup_locked(self) -> None:
         now = time.time()
-        expired = [jid for jid, job in self._jobs.items()
-                   if job.finished and now - job.finished > JOB_TTL_SECONDS]
+        finished = sorted((job.finished, jid) for jid, job in self._jobs.items() if job.finished)
+        expired = {jid for when, jid in finished if now - when > JOB_TTL_SECONDS}
+        expired.update(jid for _, jid in finished[:max(0, len(finished) - MAX_FINISHED_JOBS)])
+        kept = 0
+        for _, jid in reversed(finished):                 # newest first
+            kept += len(self._jobs[jid].body or b"")
+            if kept > MAX_FINISHED_BYTES:
+                expired.add(jid)
         for jid in expired:
             job = self._jobs.pop(jid)
             if self._by_key.get(job.key) == jid:

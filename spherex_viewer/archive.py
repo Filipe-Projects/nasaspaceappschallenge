@@ -243,6 +243,26 @@ def expand_box(box, margin: int, nx: int, ny: int):
     return clip_box(box[0] - margin, box[1] + margin, box[2] - margin, box[3] + margin, nx, ny)
 
 
+# A file keeps one window on disk.  A request just outside it (a source clicked
+# near the edge of the field) reads the box around both when that box is barely
+# bigger than the two windows, so the field's window is not lost and the next
+# load of the field is not read from IRSA again.
+MERGE_SLACK = 1.25
+MERGE_MAX_PIXELS = 600 * 600
+
+
+def _area(box) -> int:
+    return (box[1] - box[0]) * (box[3] - box[2])
+
+
+def merged_box(want, held):
+    """*want* grown to also hold the kept window *held*, when that costs little; else *want*."""
+    merged = (min(want[0], held[0]), max(want[1], held[1]), min(want[2], held[2]), max(want[3], held[3]))
+    if _area(merged) <= min(MERGE_SLACK * (_area(want) + _area(held)), MERGE_MAX_PIXELS):
+        return merged
+    return want
+
+
 # --------------------------------------------------------------------------
 # Archive
 # --------------------------------------------------------------------------
@@ -281,13 +301,18 @@ class Archive:
             return None
 
         image = None
+        held = None
         if speculative is not None and box_covers(speculative[0], need):
             self._store_window(IMAGE_NS, exp.url, speculative[0], speculative[1])
             image = crop(speculative[1], speculative[0], need)
         if image is None:
-            image = self._cached_window(IMAGE_NS, exp.url, need)
+            held = self._held_window(IMAGE_NS, exp.url)
+            if held is not None and box_covers(held[0], need):
+                image = crop(held[1], held[0], need)
         if image is None:
             want = expand_box(need, config.CUTOUT_MARGIN_PX, info.nx, info.ny)
+            if held is not None:
+                want = merged_box(want, held[0])
             full = self._read_image_rows(exp.url, info, want)
             self._store_window(IMAGE_NS, exp.url, want, full)
             image = crop(full, want, need)
@@ -532,14 +557,18 @@ class Archive:
             raise RangeError(f"{exp.url}: WCS-WAVE table not found at the end of the file")
 
     # ------------------------------------------------------------------ window cache
-    def _cached_window(self, namespace: str, url: str, need) -> np.ndarray | None:
+    def _held_window(self, namespace: str, url: str):
+        """``(window, pixels)`` kept on disk for a file, or None."""
         data = self.cache.get_arrays(namespace, url)
         if not data or "win" not in data or "data" not in data:
             return None
-        win = tuple(int(v) for v in data["win"])
-        if not box_covers(win, need):
+        return tuple(int(v) for v in data["win"]), data["data"]
+
+    def _cached_window(self, namespace: str, url: str, need) -> np.ndarray | None:
+        held = self._held_window(namespace, url)
+        if held is None or not box_covers(held[0], need):
             return None
-        return crop(data["data"], win, need)
+        return crop(held[1], held[0], need)
 
     def _store_window(self, namespace: str, url: str, win, arr: np.ndarray, compressed: bool = False) -> None:
         self.cache.put_arrays(namespace, url, {"data": arr, "win": np.asarray(win, dtype=np.int32)},

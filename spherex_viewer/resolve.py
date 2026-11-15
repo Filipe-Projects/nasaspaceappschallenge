@@ -4,6 +4,7 @@ from __future__ import annotations
 import math
 import re
 import xml.etree.ElementTree as ET
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from datetime import datetime, timezone
 from urllib.parse import quote
 
@@ -206,34 +207,74 @@ def _parse_sesame(text: str, name: str) -> dict | None:
     }
 
 
+class _NoAnswer(RuntimeError):
+    """A Sesame server that could not be reached or did not give a real answer."""
+
+
+def _ask_sesame(base: str, name: str) -> dict | None:
+    """One server's answer: the target, or None when it says the name is unknown."""
+    try:
+        resp = fetch("GET", base + "?" + quote(name), timeout=9, what="Sesame", retries=0, allow_redirects=True)
+    except Exception as exc:  # noqa: BLE001 - another mirror may answer
+        raise _NoAnswer(str(exc)) from exc
+    if resp.status_code != 200:
+        raise _NoAnswer(f"HTTP {resp.status_code} from {base}")
+    text = resp.text
+    found = _parse_sesame(text, name)
+    if found is not None:
+        return found
+    if "<Resolver" in text or "<Target" in text:
+        return None                      # a real answer: the name is unknown
+    raise _NoAnswer(f"no answer from {base}")
+
+
+SESAME_CACHE_TTL = 30 * 86400.0
+# The Strasbourg server is asked first; the mirrors join in when it has not answered by then.
+SESAME_HEDGE_SECONDS = 2.0
+
+
 def sesame(name: str) -> dict | None:
     """Resolve a name with the CDS Sesame service (Simbad, NED, VizieR).
 
-    Tries the Strasbourg server and its mirrors in turn.  Returns None when
-    the name is unknown; raises when no server could be reached.
+    Asks the Strasbourg server first and, when it is slow to answer, its
+    mirrors as well; the first real answer wins.  Names already resolved are
+    remembered.  Returns None when the name is unknown; raises when no server
+    could be reached.
     """
-    last_error: Exception | None = None
-    answered = False
-    for base in config.SESAME_URLS:
-        url = base + "?" + quote(name)
-        try:
-            resp = fetch("GET", url, timeout=9, what="Sesame", retries=0, allow_redirects=True)
-            if resp.status_code != 200:
-                last_error = RuntimeError(f"HTTP {resp.status_code} from {base}")
-                continue
-            text = resp.text
-        except Exception as exc:  # noqa: BLE001 - try the next mirror
-            last_error = exc
-            continue
-        answered = True
-        found = _parse_sesame(text, name)
-        if found is not None:
-            return found
-        if "<Resolver" in text or "<Target" in text:
-            return None                      # a real answer: the name is unknown
-    if not answered and last_error is not None:
-        raise last_error
-    return None
+    from .cache import default_cache
+
+    cache_key = re.sub(r"\s+", " ", name.strip().lower())
+    cached = default_cache().get_json("sesame", cache_key, ttl=SESAME_CACHE_TTL)
+    if isinstance(cached, dict) and "ra" in cached:
+        return cached
+    bases = list(config.SESAME_URLS)
+    if not bases:
+        return None
+    pool = ThreadPoolExecutor(max_workers=len(bases), thread_name_prefix="sesame")
+    try:
+        pending = {pool.submit(_ask_sesame, bases[0], name)}
+        waiting = list(bases[1:])
+        last_error: Exception | None = None
+        while pending:
+            done, pending = wait(pending, timeout=SESAME_HEDGE_SECONDS if waiting else None,
+                                 return_when=FIRST_COMPLETED)
+            for future in done:
+                try:
+                    found = future.result()
+                except _NoAnswer as exc:
+                    last_error = exc
+                    continue
+                if found is not None:
+                    default_cache().put_json("sesame", cache_key, found)
+                return found
+            if waiting and (not done or not pending):    # slow, or failed: bring in the mirrors
+                pending |= {pool.submit(_ask_sesame, base, name) for base in waiting}
+                waiting = []
+        if last_error is not None:
+            raise RuntimeError(str(last_error))
+        return None
+    finally:
+        pool.shutdown(wait=False)
 
 
 def resolve(query: str, epoch_to: float | None = None) -> dict:

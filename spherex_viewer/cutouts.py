@@ -131,10 +131,114 @@ def header_from_cards(cards) -> fits.Header:
 
 
 def make_wcs(header_or_cards) -> WCS:
+    if not isinstance(header_or_cards, fits.Header):
+        fast = wcs_from_cards(header_or_cards)
+        if fast is not None:
+            return fast
     header = header_or_cards if isinstance(header_or_cards, fits.Header) else header_from_cards(header_or_cards)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         return WCS(header)
+
+
+# Every SPHEREx Level 2 image so far has the same celestial WCS: TAN with SIP
+# distortion (A, B, AP, BP), a PC matrix and CDELT.  Going through
+# astropy.io.fits.Header to build it costs ~40 ms of pure Python per exposure
+# (70% of a whole frame build, all of it under the GIL); setting the same
+# numbers directly takes ~0.2 ms.  Any other layout takes the general path.
+_SIP_COEFF = re.compile(r"^(A|B|AP|BP)_(\d+)_(\d+)$")
+_FAST_CTYPES = ("RA---TAN-SIP", "DEC--TAN-SIP")
+_FAST_KEYS = {"CRPIX1", "CRPIX2", "CRVAL1", "CRVAL2", "CDELT1", "CDELT2", "PC1_1", "PC1_2", "PC2_1", "PC2_2",
+              "CTYPE1", "CTYPE2", "CUNIT1", "CUNIT2", "LONPOLE", "LATPOLE", "RADESYS", "WCSAXES", "NAXIS",
+              "NAXIS1", "NAXIS2", "A_ORDER", "B_ORDER", "AP_ORDER", "BP_ORDER"}
+# Cards kept with the WCS that play no part in the sky <-> pixel transformation.
+_PASSIVE_KEYS = {"BITPIX", "BUNIT", "DETECTOR", "OBSID", "EXPTIME", "PSF_FWHM", "BZERO", "BSCALE",
+                 "MJD-OBS", "MJD-AVG", "MJD-BEG", "MJD-END", "DATE-OBS", "DATE-AVG"}
+_fast_wcs = {"enabled": True, "checked": 0}
+
+
+def _sip_matrix(coeffs: dict, order) -> np.ndarray | None:
+    """The coefficient matrix exactly as astropy's SIP reader fills it."""
+    if order is None or int(order) <= 1:
+        return None
+    m = int(order)
+    out = np.zeros((m + 1, m + 1), np.double)
+    for (i, j), value in coeffs.items():
+        if i + j <= m:
+            out[i, j] = value
+    return out
+
+
+def _build_fast_wcs(cards) -> WCS | None:
+    h: dict = {}
+    sip: dict[str, dict] = {"A": {}, "B": {}, "AP": {}, "BP": {}}
+    for key, value in cards:
+        match = _SIP_COEFF.match(key)
+        if match:
+            sip[match.group(1)][(int(match.group(2)), int(match.group(3)))] = float(value)
+        elif key in _FAST_KEYS:
+            h[key] = value
+        elif key not in _PASSIVE_KEYS:
+            return None
+    if (h.get("CTYPE1"), h.get("CTYPE2")) != _FAST_CTYPES or int(h.get("WCSAXES", 2)) != 2:
+        return None
+    if not all(k in h for k in ("CRPIX1", "CRPIX2", "CRVAL1", "CRVAL2", "A_ORDER", "B_ORDER")):
+        return None
+    a, b = _sip_matrix(sip["A"], h.get("A_ORDER")), _sip_matrix(sip["B"], h.get("B_ORDER"))
+    ap, bp = _sip_matrix(sip["AP"], h.get("AP_ORDER")), _sip_matrix(sip["BP"], h.get("BP_ORDER"))
+    if a is None or b is None or (ap is None) != (bp is None):
+        return None
+    crpix = (float(h["CRPIX1"]), float(h["CRPIX2"]))
+    out = WCS(naxis=2)
+    out.wcs.ctype = list(_FAST_CTYPES)
+    out.wcs.crpix = list(crpix)
+    out.wcs.crval = [float(h["CRVAL1"]), float(h["CRVAL2"])]
+    out.wcs.cdelt = [float(h.get("CDELT1", 1.0)), float(h.get("CDELT2", 1.0))]
+    out.wcs.pc = [[float(h.get("PC1_1", 1.0)), float(h.get("PC1_2", 0.0))],
+                  [float(h.get("PC2_1", 0.0)), float(h.get("PC2_2", 1.0))]]
+    out.wcs.cunit = [str(h.get("CUNIT1", "deg")), str(h.get("CUNIT2", "deg"))]
+    if "LONPOLE" in h:
+        out.wcs.lonpole = float(h["LONPOLE"])
+    if "LATPOLE" in h:
+        out.wcs.latpole = float(h["LATPOLE"])
+    if "RADESYS" in h:
+        out.wcs.radesys = str(h["RADESYS"])
+    out.sip = Sip(a, b, ap, bp, crpix)
+    if "NAXIS1" in h and "NAXIS2" in h:
+        out.pixel_shape = (int(h["NAXIS1"]), int(h["NAXIS2"]))
+    out.wcs.set()
+    return out
+
+
+def wcs_from_cards(cards) -> WCS | None:
+    """Fast TAN-SIP WCS from reduced header cards, or None when the general path must be used.
+
+    The first few WCSs built this way in a process are compared with the
+    general path; any disagreement switches the shortcut off for good.
+    """
+    if not _fast_wcs["enabled"]:
+        return None
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            fast = _build_fast_wcs(cards)
+    except Exception:  # noqa: BLE001 - the general path decides
+        return None
+    if fast is None or _fast_wcs["checked"] >= 6:
+        return fast
+    _fast_wcs["checked"] += 1
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        slow = WCS(header_from_cards(cards))
+        xs = np.array([10.0, 1020.0, 2030.0, 300.0, 1700.0])
+        ys = np.array([15.0, 1020.0, 2025.0, 1800.0, 250.0])
+        ra, dec = slow.all_pix2world(xs, ys, 0)
+        same_sky = np.allclose(fast.all_pix2world(xs, ys, 0), (ra, dec), rtol=0, atol=1e-10)
+        same_pix = np.allclose(fast.all_world2pix(ra, dec, 0), slow.all_world2pix(ra, dec, 0), rtol=0, atol=1e-7)
+    if not (same_sky and same_pix):
+        _fast_wcs["enabled"] = False
+        return None
+    return fast
 
 
 def world_to_pixel(wcs: WCS, ra, dec):

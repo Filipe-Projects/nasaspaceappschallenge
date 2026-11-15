@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import json
 import logging
 import math
+import os
 import threading
 import time
 import warnings
@@ -21,7 +23,7 @@ from .photometry import measure
 from .processing import (Epoch, ReprojectedFrame, TargetGrid, group_epochs, plan_grid,
                          reproject_cutout, select_exposures, stack_frames)
 from .resolve import propagate
-from .sia import Exposure, find_exposures, mjd_to_iso, mjd_to_year, search_is_cached
+from .sia import Exposure, cached_exposures, find_exposures, mjd_to_iso, mjd_to_year, search_is_cached
 
 log = logging.getLogger("spherex_viewer")
 
@@ -126,12 +128,26 @@ def normalise_frame_params(params: dict) -> dict:
 # Fields being read from IRSA in the background while their saved copy is on show.
 _warming: set[tuple] = set()
 _warm_failed: dict[tuple, float] = {}
+# Live answers read in the background that could not go to the disk cache
+# (one exposure failed, or one release could not be searched): kept here so the
+# next visit gets them at once instead of reading the field again.
+_warm_results: dict[str, tuple[float, dict]] = {}
 _warm_lock = threading.Lock()
 WARM_RETRY_SECONDS = 300.0
+# Background reads leave most of the CPU and of IRSA's patience to the visitor's own requests.
+WARM_WORKERS = int(os.environ.get("SPHEREX_WARM_WORKERS", "6"))
 
 
 def _field_key(p: dict) -> tuple:
     return (round(p["ra"], 5), round(p["dec"], 5), round(p["fov"], 3), p.get("group", "epoch"), p.get("detector", "ALL"))
+
+
+def _params_id(p: dict) -> str:
+    return json.dumps(p, sort_keys=True, separators=(",", ":"), default=str)
+
+
+def _frames_key(exposures, p: dict) -> str:
+    return f"frames|v{RESULT_VERSION}|{_exposure_hash(exposures)}|{sorted(p.items())}"
 
 
 def _is_warming(p: dict) -> bool:
@@ -139,56 +155,85 @@ def _is_warming(p: dict) -> bool:
         return _field_key(p) in _warming
 
 
-def _warm_later(p: dict) -> None:
-    """Read the field from IRSA in the background, so the next visit gets the live result."""
+def _ready_frames(p: dict, check_only: bool = False):
+    """The live answer for *p* if it can be given without reading anything from IRSA.
+
+    With *check_only*, just whether it can (without loading it).
+    """
+    with _warm_lock:
+        kept = _warm_results.get(_params_id(p))
+    if kept is not None and time.time() - kept[0] < config.SIA_CACHE_TTL:
+        return True if check_only else kept[1]
+    exposures = cached_exposures(p["ra"], p["dec"], search_radius_deg(p["fov"]))
+    if not exposures:
+        return False if check_only else None
+    cache = default_cache()
+    if check_only:
+        return cache.path("results", _frames_key(exposures, p), ".json").exists()
+    result = cache.get_json("results", _frames_key(exposures, p))
+    if result is not None:
+        result["cached"] = True
+    return result
+
+
+def warm(p: dict, workers: int | None = None) -> None:
+    """Read a field that has a saved copy from IRSA now, so later visits get the live result.
+
+    Never runs twice at once for a field, and waits a few minutes after a
+    failure before trying again.
+    """
     key = _field_key(p)
     with _warm_lock:
         if key in _warming or time.time() - _warm_failed.get(key, 0.0) < WARM_RETRY_SECONDS:
             return
         _warming.add(key)
+    try:
+        result = _build_frames(p, lambda *_: None, workers=workers or WARM_WORKERS)
+        saved = snapshots.find("frames", p)
+        if saved is not None and result["n_used"] < 0.5 * saved["n_used"]:
+            raise RuntimeError("most exposures could not be read")
+        with _warm_lock:
+            _warm_results[_params_id(p)] = (time.time(), result)
+    except Exception as exc:  # noqa: BLE001 - the saved copy stays on show
+        log.warning("could not read (%.5f, %.5f) from IRSA: %s", p["ra"], p["dec"], exc)
+        with _warm_lock:
+            _warm_failed[key] = time.time()
+    finally:
+        with _warm_lock:
+            _warming.discard(key)
 
-    def work() -> None:
-        try:
-            _build_frames(p, lambda *_: None)
-        except Exception as exc:  # noqa: BLE001 - the saved copy stays on show
-            log.warning("could not read (%.5f, %.5f) from IRSA: %s", p["ra"], p["dec"], exc)
-            with _warm_lock:
-                _warm_failed[key] = time.time()
-        finally:
-            with _warm_lock:
-                _warming.discard(key)
 
-    threading.Thread(target=work, name="warm", daemon=True).start()
+def _warm_later(p: dict) -> None:
+    """Read the field from IRSA in the background, so the next visit gets the live result."""
+    if _is_warming(p):
+        return
+    threading.Thread(target=warm, args=(p,), name="warm", daemon=True).start()
 
 
 def build_frames(params: dict, progress, fallback: bool = True) -> dict:
     """The frame sequence for the viewer (JSON-serialisable).
 
-    The five test targets have a saved copy (see snapshots.py).  It is shown
-    at once when the field has never been read on this server, while IRSA is
-    read in the background, and whenever IRSA cannot be reached; a field that
-    is in the cache is always answered from the live data.
+    The five test targets have a saved copy (see snapshots.py).  Their live
+    result is given when it is ready (in the disk cache, or read in the
+    background earlier); until then the saved copy is shown at once while
+    IRSA is read in the background, so a visitor never waits on the archive
+    for them.
     """
     p = normalise_frame_params(params)
-    saved = snapshots.find("frames", p) if fallback else None
-    if saved is not None and (_is_warming(p) or not search_is_cached(p["ra"], p["dec"], search_radius_deg(p["fov"]))):
-        _warm_later(p)
-        progress(1, 1, "loaded a saved copy")
-        return saved
-    try:
-        result = _build_frames(p, progress)
-        if saved is not None and result["n_used"] < 0.5 * saved["n_used"]:
-            raise RuntimeError("most exposures could not be read")
-        return result
-    except Exception as exc:  # noqa: BLE001 - a saved copy is better than an error
-        if saved is None:
-            raise
-        log.warning("frames for (%.5f, %.5f) served from a snapshot: %s", p["ra"], p["dec"], exc)
-        progress(1, 1, "loaded a saved copy")
-        return saved
+    if fallback and snapshots.has("frames", p):
+        live = _ready_frames(p)
+        if live is not None:
+            progress(1, 1, "loaded from cache")
+            return live
+        saved = snapshots.find("frames", p)
+        if saved is not None:
+            _warm_later(p)
+            progress(1, 1, "loaded a saved copy")
+            return saved
+    return _build_frames(p, progress)
 
 
-def _build_frames(p: dict, progress, search_timeout: float | None = None) -> dict:
+def _build_frames(p: dict, progress, search_timeout: float | None = None, workers: int | None = None) -> dict:
     t_start = time.time()
     ra, dec, fov = p["ra"], p["dec"], p["fov"]
     progress(0, 1, "searching the IRSA archive")
@@ -199,7 +244,7 @@ def _build_frames(p: dict, progress, search_timeout: float | None = None) -> dic
         raise LookupError("No SPHEREx exposures cover this position yet.")
 
     cache = default_cache()
-    result_key = f"frames|v{RESULT_VERSION}|{_exposure_hash(exposures)}|{sorted(p.items())}"
+    result_key = _frames_key(exposures, p)
     cached = cache.get_json("results", result_key)
     if cached is not None:
         progress(1, 1, "loaded from cache")
@@ -242,7 +287,7 @@ def _build_frames(p: dict, progress, search_timeout: float | None = None) -> dic
     n_used = 0
     progress(0, total, f"reading {total} exposures from IRSA")
 
-    with ThreadPoolExecutor(max_workers=config.MAX_WORKERS) as pool:
+    with ThreadPoolExecutor(max_workers=workers or config.MAX_WORKERS) as pool:
         futures = {pool.submit(task, exp): exp for exp in wanted}
         for future in as_completed(futures):
             exp = futures[future]
@@ -437,13 +482,15 @@ def build_spectrum(params: dict, progress, fallback: bool = True) -> dict:
 
     When the request names the field the viewer is showing, the same search
     and the same exposure subsample are used, so every cutout is already in
-    the cache and the answer is immediate.
+    the cache and the answer is immediate.  The saved spectrum of a test
+    target goes with its saved frames: it is shown until the field's live
+    frames are ready.
     """
     p = normalise_spectrum_params(params)
     saved = snapshots.find("spectrum", p) if fallback else None
     if saved is not None:
-        field = dict(p["field"], group="epoch", detector="ALL")
-        if _is_warming(field) or not search_is_cached(field["ra"], field["dec"], search_radius_deg(field["fov"])):
+        field = normalise_frame_params(dict(p["field"], max_exposures=p["max_exposures"]))
+        if _is_warming(field) or not _ready_frames(field, check_only=True):
             progress(1, 1, "loaded a saved copy")
             return saved
     try:
